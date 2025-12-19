@@ -7,6 +7,9 @@ crons = ["*/15 * * * *"]
 
 [vars]
 FEED_URL = "https://www.stortinget.no/no/Stottemeny/RSS/Lovbeslutninger/"
+EDGE_FUNCTION_URL = "http://localhost:54321/functions/v1/ingest-stortinget"
+STORTINGET_WORKER_SECRET = "Y9XRd.Xcf8e2y49"
+# For local dev, you can set them here or use wrangler secret put
 
 [build]
 command = "cargo install -q worker-build@^0.7 && worker-build --release"
