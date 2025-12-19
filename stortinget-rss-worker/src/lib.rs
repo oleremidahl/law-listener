@@ -11,10 +11,9 @@ struct LawProposal {
     title: String,
     stortinget_link: Option<String>,
     feed_description: Option<String>,
-    decision_date: Option<String>, // ISO date string (YYYY-MM-DD)
+    decision_date: Option<String>,
 }
 
-// Parse RSS XML and extract items
 fn parse_rss_items(xml: &str) -> Result<Vec<LawProposal>> {
     let mut reader = Reader::from_str(xml);
     reader.trim_text(true);
@@ -32,32 +31,35 @@ fn parse_rss_items(xml: &str) -> Result<Vec<LawProposal>> {
             Ok(Event::Start(e)) => {
                 let name = e.name();
                 let name_bytes = name.as_ref();
-                let tag_name = str::from_utf8(name_bytes)
-                    .map_err(|_| Error::RustError("Invalid UTF-8 in XML".into()))?
-                    .to_string();
                 
-                if tag_name == "item" {
-                    in_item = true;
-                    current_item = Some(LawProposal {
-                        stortinget_id: String::new(),
-                        title: String::new(),
-                        stortinget_link: None,
-                        feed_description: None,
-                        decision_date: None,
-                    });
-                } else if in_item {
-                    current_tag = tag_name.to_string();
-                    if tag_name == "dc:date" {
+                match name_bytes {
+                    b"item" => {
+                        in_item = true;
+                        current_item = Some(LawProposal {
+                            stortinget_id: String::new(),
+                            title: String::new(),
+                            stortinget_link: None,
+                            feed_description: None,
+                            decision_date: None,
+                        });
+                    }
+                    b"dc:date" if in_item => {
                         capturing_date = true;
                         date_text.clear();
                     }
+                    _ if in_item => {
+                        current_tag = str::from_utf8(name_bytes)
+                            .map_err(|_| Error::RustError("Invalid UTF-8 in XML tag".into()))?
+                            .to_string();
+                    }
+                    _ => {}
                 }
             }
             Ok(Event::Text(e)) => {
                 if in_item {
                     let text = e.unescape()
                         .map_err(|_| Error::RustError("Failed to unescape XML".into()))?
-                        .to_string();
+                        .into_owned();
                     
                     if capturing_date {
                         date_text.push_str(&text);
@@ -66,7 +68,7 @@ fn parse_rss_items(xml: &str) -> Result<Vec<LawProposal>> {
                             "title" => {
                                 if let Some(ref mut item) = current_item {
                                     item.title = text.clone();
-                                    item.stortinget_id = text; // Same value for both
+                                    item.stortinget_id = text; 
                                 }
                             }
                             "link" => {
@@ -85,48 +87,36 @@ fn parse_rss_items(xml: &str) -> Result<Vec<LawProposal>> {
                 }
             }
             Ok(Event::End(e)) => {
-                let name = e.name();
-                let name_bytes = name.as_ref();
-                let tag_name = str::from_utf8(name_bytes)
-                    .map_err(|_| Error::RustError("Invalid UTF-8 in XML".into()))?
-                    .to_string();
+                let name_bytes = e.name().into_inner();
                 
-                if tag_name == "item" {
-                    if let Some(item) = current_item.take() {
-                        items.push(item);
-                    }
-                    in_item = false;
-                    current_tag.clear();
-                    capturing_date = false;
-                    date_text.clear();
-                } else if (tag_name == "dc:date") && in_item {
-                    // Finished reading date, parse and store it
-                    if let Some(ref mut item) = current_item {
-                        if let Some(parsed_date) = parse_date(&date_text) {
-                            item.decision_date = Some(parsed_date);
+                match name_bytes {
+                    b"item" => {
+                        if let Some(item) = current_item.take() {
+                            items.push(item);
                         }
+                        in_item = false;
+                        capturing_date = false;
                     }
-                    capturing_date = false;
-                    date_text.clear();
+                    b"dc:date" if in_item => {
+                        if let Some(ref mut item) = current_item {
+                            item.decision_date = parse_date(&date_text);
+                        }
+                        capturing_date = false;
+                    }
+                    _ => {}
                 }
+                current_tag.clear(); // Tømmer taggen etter hver slutt-tag for sikkerhet
             }
             Ok(Event::Eof) => break,
-            Err(e) => {
-                console_error!("XML parsing error: {:?}", e);
-                return Err(Error::RustError(format!("XML parse error: {:?}", e)));
-            }
+            Err(e) => return Err(Error::RustError(format!("XML parse error: {:?}", e))),
             _ => {}
         }
         buf.clear();
     }
-    
     Ok(items)
 }
 
-// Parse ISO 8601 date to YYYY-MM-DD format
 fn parse_date(date_str: &str) -> Option<String> {
-    // Try to parse various date formats and convert to YYYY-MM-DD
-    // Common formats: "2024-12-19T10:00:00Z", "2024-12-19", etc.
     if let Some(date_part) = date_str.split('T').next() {
         if date_part.len() >= 10 {
             return Some(date_part[..10].to_string());
@@ -138,82 +128,70 @@ fn parse_date(date_str: &str) -> Option<String> {
 // Internal async job logic that can use `Result` and `?`.
 async fn run_scheduled_job(env: Env) -> Result<()> {
     let start = Date::now();
-    console_log!("scheduled job: starting fetch");
+    let kv = env.kv("STORTINGET_STATE")?;
 
-    // Read config from env vars
-    let feed_url = env
-        .var("FEED_URL")
-        .map_err(|_| Error::RustError("Missing FEED_URL var".into()))?
-        .to_string();
-    
-    let edge_function_url = env
-        .var("EDGE_FUNCTION_URL")
-        .map_err(|_| Error::RustError("Missing EDGE_FUNCTION_URL var".into()))?
-        .to_string();
-    
-    let worker_secret = env
-        .var("STORTINGET_WORKER_SECRET")
-        .map_err(|_| Error::RustError("Missing STORTINGET_WORKER_SECRET var".into()))?
-        .to_string();
+    // 1. Fetch Config & Feed
+    let feed_url = env.var("FEED_URL")?.to_string();
+    let edge_function_url = env.var("EDGE_FUNCTION_URL")?.to_string();
+    let worker_secret = env.var("STORTINGET_WORKER_SECRET")?.to_string();
 
-    // Fetch RSS feed
-    let mut init = RequestInit::new();
-    init.with_method(Method::Get);
-    let req = Request::new_with_init(&feed_url, &init)?;
-    let mut resp = Fetch::Request(req).send().await?;
-
-    if resp.status_code() >= 400 {
-        console_error!("fetch failed: status={}", resp.status_code());
-        return Ok(());
-    }
-
+    let mut resp = Fetch::Url(feed_url.parse()?).send().await?;
     let body_text = resp.text().await?;
-    console_log!("fetch ok: bytes={}", body_text.len());
+    let all_items = parse_rss_items(&body_text)?;
 
-    // Parse RSS XML
-    let parse_start = Date::now();
-    let items = parse_rss_items(&body_text)?;
-    let parse_duration = Date::now() - parse_start;
-    console_log!("parsed {} items in {:.2} ms", items.len(), parse_duration);
-
-    if items.is_empty() {
-        console_log!("no items found in RSS feed");
+    if all_items.is_empty() {
         return Ok(());
     }
 
-    // Send to Edge Function
-    let payload = serde_json::json!({ "items": items });
-    // log the three first items
-    console_log!("first three items: {:?}", items.iter().take(3).collect::<Vec<&LawProposal>>());
-    let payload_str = serde_json::to_string(&payload)
-        .map_err(|e| Error::RustError(format!("JSON serialization error: {:?}", e)))?;
+    // 2. Determine what is actually new
+    let last_seen_url: Option<String> = kv.get("latest_seen_url").text().await?;
+    let mut new_items = Vec::new();
 
-    let headers = {
-        let h = Headers::new();
-        h.set("Content-Type", "application/json")?;
-        h.set("x-ingest-secret", &worker_secret)?;
-        h
-    };
+    for item in all_items {
+        if let Some(ref seen_url) = last_seen_url {
+            // Stop if we encounter the most recent item from the previous run
+            if item.stortinget_link.as_deref() == Some(seen_url) {
+                break;
+            }
+        }
+        new_items.push(item);
+    }
+
+    // 3. Abort if no new data
+    if new_items.is_empty() {
+        console_log!("No new items found. Aborting execution.");
+        return Ok(());
+    }
+
+    // 4. Send only new items to Edge Function
+    let payload = serde_json::json!({ "items": new_items });
+    let payload_str = serde_json::to_string(&payload)
+        .map_err(|e| Error::RustError(format!("JSON error: {:?}", e)))?;
+
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json")?;
+    headers.set("x-ingest-secret", &worker_secret)?;
     
     let mut edge_init = RequestInit::new();
     edge_init.with_method(Method::Post);
     edge_init.with_headers(headers);
     edge_init.with_body(Some(payload_str.into()));
 
-    let edge_req = Request::new_with_init(&edge_function_url, &edge_init)?;
-    let mut edge_resp = Fetch::Request(edge_req).send().await?;
+    let edge_resp = Fetch::Request(Request::new_with_init(&edge_function_url, &edge_init)?).send().await?;
     
     if edge_resp.status_code() >= 400 {
-        let error_text = edge_resp.text().await.unwrap_or_else(|_| "Unknown error".into());
-        console_error!("edge function error: status={}, body={}", edge_resp.status_code(), error_text);
-        return Err(Error::RustError(format!("Edge function failed: {}", edge_resp.status_code())));
+        return Err(Error::RustError("Edge function ingestion failed".into()));
     }
 
-    console_log!("successfully sent {} items to edge function", items.len());
+    // 5. Update KV with the newest link from this batch
+    // (new_items[0] is the top-most/newest item in the feed)
+    if let Some(newest_link) = &new_items[0].stortinget_link {
+        kv.put("latest_seen_url", newest_link)?.execute().await?;
+    }
+    let total_time = Date::now() - start;
+    console_log!("Total time taken: {}ms", total_time);
 
-    let duration_ms = Date::now() - start;
-    console_log!("scheduled job completed in {:.2} ms", duration_ms);
-
+    console_log!("Sent {} new items to edge function.", new_items.len());
     Ok(())
 }
 
