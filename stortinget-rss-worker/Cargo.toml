@@ -1,0 +1,13 @@
+[package]
+name = "stortinget-rss-worker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ole Remi Dahl <olerd@stud.ntnu.no>"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worker = { version = "0.7", features = ['http'] }
+worker-macros = { version = "0.7", features = ['http'] }
+http = "1.3"
