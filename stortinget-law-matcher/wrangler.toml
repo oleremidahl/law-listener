@@ -1,0 +1,9 @@
+name = "stortinget-law-matcher"
+main = "build/index.js"
+compatibility_date = "2025-12-20"
+
+[ai]
+binding = "AI"
+
+[build]
+command = "cargo install -q worker-build@^0.7 && worker-build --release"

@@ -15,5 +15,20 @@ EDGE_FUNCTION_URL = "https://fwynzlokbzycftaaeuhb.supabase.co/functions/v1/inges
 binding = "STORTINGET_STATE"
 id ="aaf6e562f4a44010b8ada55c881efeb1"
 
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
+
 [build]
 command = "cargo install -q worker-build@^0.7 && worker-build --release"
