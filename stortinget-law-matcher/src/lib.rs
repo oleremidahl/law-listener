@@ -8,7 +8,7 @@ struct WebhookPayload {
 
 #[derive(Deserialize, Serialize)]
 struct LawProposal {
-    id: i32,
+    id: String, // UUID
     stortinget_link: Option<String>,
 }
 
@@ -17,6 +17,12 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
     let mut req = req;
     
+    let expected = env.secret("WEBHOOK_SHARED_SECRET")?.to_string();
+        let got = req.headers().get("x-webhook-secret")?.unwrap_or_default();
+        if got != expected {
+            return Response::error("You don't know the secret ;)))", 403);
+        }
+
     // 1. Receive Webhook from Supabase
     let payload: WebhookPayload = match req.json().await {
         Ok(p) => p,
