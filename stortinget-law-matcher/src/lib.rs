@@ -12,6 +12,22 @@ struct LawProposal {
     stortinget_link: Option<String>,
 }
 
+#[derive(Serialize)]
+struct AiMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct AiInput {
+    messages: Vec<AiMessage>,
+}
+
+#[derive(Deserialize)]
+struct AiResponse {
+    response: String,
+}
+
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
@@ -50,6 +66,53 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let clean_text = strip_html_tags(&extracted_section);
 
     console_log!("Extracted Clean Text: {}", clean_text);
+
+    // 5. Send clean_text to Workers AI (Llama 3.1)
+    let ai = env.ai("AI")?;
+
+    let system_prompt: &str = "Du er en norsk juridisk ekspert. Din oppgave er å trekke ut Law IDs fra en lovtekst som beskriver endringer i eksisterende lover.
+
+Instruksjoner:
+1. Identifiser hver lov som skal endres. Disse står alltid etter romertall (I, II, III, IV...) og starter med formelen 'I lov [dato] nr. [nummer]'.
+2. Formatet skal være: LOV-YYYY-MM-DD-NN.
+3. VIKTIG: Ikke bland sammen årstall for fødselsdato (f.eks. 'født i 1963') med selve lovens dato. Lovens dato står rett etter ordet 'lov'.
+4. Månedsnavn skal konverteres til tall (januar=01, juni=06, osv.).
+5. IKKE hallusiner lovnummer. Om det ikke eksplisitt står 'nr. XX', skal du IKKE finne på et nummer, og dermed har du ikke funnet en gyldig Id.
+6. Se bort fra teksten til slutt om ikrafttredelse (f.eks. 'Lova gjeld frå...'). Vi skal kun ha lovene som faktisk endres i hovedteksten.
+7. Returner KUN en kommaseparert liste med IDs. Hvis ingen treff, returner 'NONE'.
+
+Eksempel på mapping:
+'I lov 28. juli 1949 nr. 26' -> LOV-1949-07-28-26
+'I lov 26. juni 1953 nr. 11' -> LOV-1953-06-26-11";
+
+    let input = AiInput {
+        messages: vec![
+            AiMessage { role: "system".into(), content: system_prompt.into() },
+            AiMessage { role: "user".into(), content: clean_text },
+        ],
+    };
+
+    // Using Llama 3.1 8B for extraction
+    let ai_response: AiResponse = ai.run("@cf/meta/llama-3.1-8b-instruct", input).await?;
+    let law_ids = ai_response.response.trim();
+
+    if law_ids == "NONE" {
+        return Response::ok("No law IDs detected");
+    }
+
+    console_log!("Detected Law IDs: {}", law_ids);
+
+    let edge_function_url = env.var("EDGE_FUNCTION_URL")?.to_string();
+    let worker_secret = env.var("LAW_MATCHER_WORKER_SECRET")?.to_string();
+
+    send_to_edge_function(
+        &edge_function_url,
+        &worker_secret,
+        &payload.record.id,
+        law_ids,
+    )?;
+    
+    // TODO: Next steps - Lookup IDs in 'legal_documents' and insert into 'proposal_targets'
 
     /* TODO: IMPLEMENT LATER
        - Send clean_text to Workers AI (Llama 3.1)
@@ -137,4 +200,32 @@ fn strip_html_tags(html: &str) -> String {
     }
 
     collapsed.trim().to_string()
+}
+
+fn send_to_edge_function(
+    url: &str,
+    secret: &str,
+    proposal_id: &str,
+    law_ids: &str,
+) -> Result<()> {
+    let client = reqwest::blocking::Client::new();
+    let mut map = std::collections::HashMap::new();
+    map.insert("proposal_id", proposal_id);
+    map.insert("law_ids", law_ids);
+
+    let res = client
+        .post(url)
+        .header("x-worker-secret", secret)
+        .json(&map)
+        .send()
+        .map_err(|e| Error::RustError(format!("Failed to send to edge function: {}", e)))?;
+
+    if !res.status().is_success() {
+        return Err(Error::RustError(format!(
+            "Edge function returned error status: {}",
+            res.status()
+        )));
+    }
+
+    Ok(())
 }
