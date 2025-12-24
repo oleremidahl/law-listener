@@ -1,4 +1,4 @@
-use worker::*;
+use worker::{web_sys::console, *};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -34,10 +34,10 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let mut req = req;
     
     let expected = env.secret("WEBHOOK_SHARED_SECRET")?.to_string();
-        let got = req.headers().get("x-webhook-secret")?.unwrap_or_default();
-        if got != expected {
-            return Response::error("You don't know the secret ;)))", 403);
-        }
+    let got = req.headers().get("x-webhook-secret")?.unwrap_or_default();
+    if got != expected {
+        return Response::error("You don't know the secret ;)))", 403);
+    }
 
     // 1. Receive Webhook from Supabase
     let payload: WebhookPayload = match req.json().await {
@@ -51,7 +51,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     };
     console_log!("Step 1: Webhook received");
 
-    // 2. Fetch Rendered Content from Cloudflare API
+    // 2. Fetch content
     let html = fetch_html(&target_url).await?;
     console_log!("Step 2: HTML fetched (length: {})", html.len());
 
@@ -72,18 +72,18 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     let system_prompt: &str = "Du er en norsk juridisk ekspert. Din oppgave er å trekke ut Law IDs fra en lovtekst som beskriver endringer i eksisterende lover.
 
-Instruksjoner:
-1. Identifiser hver lov som skal endres. Disse står alltid etter romertall (I, II, III, IV...) og starter med formelen 'I lov [dato] nr. [nummer]'.
-2. Formatet skal være: LOV-YYYY-MM-DD-NN.
-3. VIKTIG: Ikke bland sammen årstall for fødselsdato (f.eks. 'født i 1963') med selve lovens dato. Lovens dato står rett etter ordet 'lov'.
-4. Månedsnavn skal konverteres til tall (januar=01, juni=06, osv.).
-5. IKKE hallusiner lovnummer. Om det ikke eksplisitt står 'nr. XX', skal du IKKE finne på et nummer, og dermed har du ikke funnet en gyldig Id.
-6. Se bort fra teksten til slutt om ikrafttredelse (f.eks. 'Lova gjeld frå...'). Vi skal kun ha lovene som faktisk endres i hovedteksten.
-7. Returner KUN en kommaseparert liste med IDs. Hvis ingen treff, returner 'NONE'.
+        Instruksjoner:
+        1. Identifiser hver lov som skal endres. Disse står alltid etter romertall (I, II, III, IV...) og starter med formelen 'I lov [dato] nr. [nummer]'.
+        2. Formatet skal være: LOV-YYYY-MM-DD-NN.
+        3. VIKTIG: Ikke bland sammen årstall for fødselsdato (f.eks. 'født i 1963') med selve lovens dato. Lovens dato står rett etter ordet 'lov'.
+        4. Månedsnavn skal konverteres til tall (januar=01, juni=06, osv.).
+        5. IKKE hallusiner lovnummer. Om det ikke eksplisitt står 'nr. XX', skal du IKKE finne på et nummer, og dermed har du ikke funnet en gyldig Id.
+        6. Se bort fra teksten til slutt om ikrafttredelse (f.eks. 'Lova gjeld frå...'). Vi skal kun ha lovene som faktisk endres i hovedteksten.
+        7. FORMAT: Returner KUN en kommaseparert liste med IDs, INGEN begrunnelser. Hvis ingen treff, returner 'NONE'.
 
-Eksempel på mapping:
-'I lov 28. juli 1949 nr. 26' -> LOV-1949-07-28-26
-'I lov 26. juni 1953 nr. 11' -> LOV-1953-06-26-11";
+        Eksempel på mapping:
+        'I lov 28. juli 1949 nr. 26' -> LOV-1949-07-28-26
+        'I lov 26. juni 1953 nr. 11' -> LOV-1953-06-26-11";
 
     let input = AiInput {
         messages: vec![
@@ -102,15 +102,19 @@ Eksempel på mapping:
 
     console_log!("Detected Law IDs: {}", law_ids);
 
-    let edge_function_url = env.var("EDGE_FUNCTION_URL")?.to_string();
-    let worker_secret = env.var("LAW_MATCHER_WORKER_SECRET")?.to_string();
+    let edge_function_url = env.var("LAW_MATCHER_EDGE_FUNCTION_URL")?.to_string();
+    let worker_secret = env.secret("LAW_MATCHER_WORKER_SECRET")?.to_string();
+    console_log!("Worker secret is empty: {}", worker_secret.is_empty());
 
-    send_to_edge_function(
-        &edge_function_url,
-        &worker_secret,
-        &payload.record.id,
-        law_ids,
-    )?;
+    match send_to_edge_function(&edge_function_url, &worker_secret, &payload.record.id, law_ids).await {
+        Ok(_) => Response::ok("AI extraction and database linking complete"),
+        Err(e) => {
+            console_log!("Error in edge function call: {}", e);
+            Response::error("Failed to link matched laws", 500)
+        }
+    }
+
+    // Response::ok("Linked laws successfully");
     
     // TODO: Next steps - Lookup IDs in 'legal_documents' and insert into 'proposal_targets'
 
@@ -121,7 +125,7 @@ Eksempel på mapping:
        - Insert matches into 'proposal_targets' table
     */
 
-    Response::ok("Content extracted successfully")
+    // Response::ok("Content extracted successfully")
 }
 
 async fn fetch_html(url: &str) -> Result<String> {
@@ -202,29 +206,37 @@ fn strip_html_tags(html: &str) -> String {
     collapsed.trim().to_string()
 }
 
-fn send_to_edge_function(
+async fn send_to_edge_function(
     url: &str,
     secret: &str,
     proposal_id: &str,
     law_ids: &str,
 ) -> Result<()> {
-    let client = reqwest::blocking::Client::new();
-    let mut map = std::collections::HashMap::new();
-    map.insert("proposal_id", proposal_id);
-    map.insert("law_ids", law_ids);
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json")?;
+    headers.set("x-worker-secret", &secret)?;
 
-    let res = client
-        .post(url)
-        .header("x-worker-secret", secret)
-        .json(&map)
-        .send()
-        .map_err(|e| Error::RustError(format!("Failed to send to edge function: {}", e)))?;
+    let body_json = serde_json::json!({
+        "proposal_id": proposal_id,
+        "extracted_ids": law_ids.split(',').map(|s| s.trim()).collect::<Vec<&str>>()
+        });
+    
+    console_log!("Sending to edge function: {}", body_json.to_string());
 
-    if !res.status().is_success() {
-        return Err(Error::RustError(format!(
-            "Edge function returned error status: {}",
-            res.status()
-        )));
+    let mut init = RequestInit::new();
+    init
+        .with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(wasm_bindgen::JsValue::from_str(&body_json.to_string())));
+
+
+    let req = Request::new_with_init(url, &init)?;
+    
+    // Perform the fetch and await the response
+    let resp = Fetch::Request(req).send().await?;
+
+    if resp.status_code() != 200 {
+        return Err(Error::from(format!("Edge function returned status {}", resp.status_code())));
     }
 
     Ok(())
