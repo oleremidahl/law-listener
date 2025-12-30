@@ -21,15 +21,9 @@ def is_main_law(soup):
 
 def parse_xml_file(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
-        # Bruker lxml-xml for å håndtere store filer raskt og korrekt
         soup = BeautifulSoup(f, 'lxml-xml')
 
-    # 1. Filtrer bort endringslover (vi vil kun ha grunnmuren)
-    if not is_main_law(soup):
-        # print(f"Hopper over endringslov: {os.path.basename(filepath)}")
-        return None
-
-    # Hjelpefunksjon for å hente metadata fra Lovdatas definisjonslister
+    # Helper to get metadata
     def get_meta(class_name):
         tag = soup.find('dt', class_=class_name)
         if tag and tag.find_next_sibling('dd'):
@@ -39,20 +33,20 @@ def parse_xml_file(filepath):
     dokid = get_meta('dokid')
     if not dokid:
         return None
+        
+    main_law_status = is_main_law(soup)
 
-    # 2. Bestem dokumenttype
-    # Basert på dine ENUMs: 'lov', 'forskrift_sentral', 'forskrift_lokal'
     doc_type = 'lov'
     if 'lov' not in dokid.lower():
         doc_type = 'forskrift_lokal' if 'ltii' in dokid.lower() else 'forskrift_sentral'
 
-    # 3. Pakk dataene for Supabase
     data = {
         "dokid": dokid,
         "legacy_id": get_meta('legacyID'), # F.eks. LOV-1884-06-14-3
         "title": soup.find('title').get_text(strip=True) if soup.find('title') else "Mangler tittel",
         "short_title": get_meta('titleShort'),
-        "document_type": doc_type
+        "document_type": doc_type,
+        "is_main_law": main_law_status,
     }
     
     return data

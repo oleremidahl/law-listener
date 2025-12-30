@@ -1,5 +1,7 @@
-use worker::{web_sys::console, *};
+use worker::*;
 use serde::{Deserialize, Serialize};
+use regex::Regex;
+use std::collections::HashSet;
 
 #[derive(Deserialize, Serialize)]
 struct WebhookPayload {
@@ -10,22 +12,6 @@ struct WebhookPayload {
 struct LawProposal {
     id: String, // UUID
     stortinget_link: Option<String>,
-}
-
-#[derive(Serialize)]
-struct AiMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Serialize)]
-struct AiInput {
-    messages: Vec<AiMessage>,
-}
-
-#[derive(Deserialize)]
-struct AiResponse {
-    response: String,
 }
 
 #[event(fetch)]
@@ -67,65 +53,23 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     console_log!("Extracted Clean Text: {}", clean_text);
 
-    // 5. Send clean_text to Workers AI (Llama 3.1)
-    let ai = env.ai("AI")?;
+    // ... after cleaning HTML text ...
+    let extracted_ids = extract_law_ids(&clean_text);
 
-    let system_prompt: &str = "Du er en norsk juridisk ekspert. Din oppgave er å trekke ut Law IDs fra en lovtekst som beskriver endringer i eksisterende lover.
+    let law_ids_str = extracted_ids.join(",");
+    console_log!("Detected Law IDs: {}", law_ids_str);
 
-        Instruksjoner:
-        1. Identifiser hver lov som skal endres. Disse står alltid etter romertall (I, II, III, IV...) og starter med formelen 'I lov [dato] nr. [nummer]'.
-        2. Formatet skal være: LOV-YYYY-MM-DD-NN.
-        3. VIKTIG: Ikke bland sammen årstall for fødselsdato (f.eks. 'født i 1963') med selve lovens dato. Lovens dato står rett etter ordet 'lov'.
-        4. Månedsnavn skal konverteres til tall (januar=01, juni=06, osv.).
-        5. IKKE hallusiner lovnummer. Om det ikke eksplisitt står 'nr. XX', skal du IKKE finne på et nummer, og dermed har du ikke funnet en gyldig Id.
-        6. Se bort fra teksten til slutt om ikrafttredelse (f.eks. 'Lova gjeld frå...'). Vi skal kun ha lovene som faktisk endres i hovedteksten.
-        7. FORMAT: Returner KUN en kommaseparert liste med IDs, INGEN begrunnelser. Hvis ingen treff, returner 'NONE'.
-
-        Eksempel på mapping:
-        'I lov 28. juli 1949 nr. 26' -> LOV-1949-07-28-26
-        'I lov 26. juni 1953 nr. 11' -> LOV-1953-06-26-11";
-
-    let input = AiInput {
-        messages: vec![
-            AiMessage { role: "system".into(), content: system_prompt.into() },
-            AiMessage { role: "user".into(), content: clean_text },
-        ],
-    };
-
-    // Using Llama 3.1 8B for extraction
-    let ai_response: AiResponse = ai.run("@cf/meta/llama-3.1-8b-instruct", input).await?;
-    let law_ids = ai_response.response.trim();
-
-    if law_ids == "NONE" {
-        return Response::ok("No law IDs detected");
-    }
-
-    console_log!("Detected Law IDs: {}", law_ids);
-
+    // 6. Send to Supabase Edge Function
     let edge_function_url = env.var("LAW_MATCHER_EDGE_FUNCTION_URL")?.to_string();
-    let worker_secret = env.secret("LAW_MATCHER_WORKER_SECRET")?.to_string();
-    console_log!("Worker secret is empty: {}", worker_secret.is_empty());
-
-    match send_to_edge_function(&edge_function_url, &worker_secret, &payload.record.id, law_ids).await {
-        Ok(_) => Response::ok("AI extraction and database linking complete"),
+    let matcher_secret = env.secret("LAW_MATCHER_WORKER_SECRET")?.to_string();
+    console_log!("Step 6: Sending to Edge Function at {}", edge_function_url);
+    match send_to_edge_function(&edge_function_url, &matcher_secret, &payload.record.id, &law_ids_str).await {
+        Ok(_) => Response::ok("Linked laws successfully"),
         Err(e) => {
-            console_log!("Error in edge function call: {}", e);
-            Response::error("Failed to link matched laws", 500)
+            console_log!("Error in edge function: {}", e);
+            Response::error("Failed to link laws", 500)
         }
-    }
-
-    // Response::ok("Linked laws successfully");
-    
-    // TODO: Next steps - Lookup IDs in 'legal_documents' and insert into 'proposal_targets'
-
-    /* TODO: IMPLEMENT LATER
-       - Send clean_text to Workers AI (Llama 3.1)
-       - Parse Law IDs from AI response
-       - Lookup Law IDs in 'legal_documents' table
-       - Insert matches into 'proposal_targets' table
-    */
-
-    // Response::ok("Content extracted successfully")
+    }   
 }
 
 async fn fetch_html(url: &str) -> Result<String> {
@@ -240,4 +184,43 @@ async fn send_to_edge_function(
     }
 
     Ok(())
+}
+
+fn extract_law_ids(text: &str) -> Vec<String> {
+    // Pattern: "lov" followed by [day]. [month] [year] "nr." [number]
+    // Matches: "lov 16. juni 2017 nr. 60"
+    let re = Regex::new(r"(?i)lov\s+(\d{1,2})\.\s*([a-zæøå]+)\s+(\d{4})\s+nr\.?\s+(\d+)").unwrap();    
+    let mut found_ids = HashSet::new();
+
+    for cap in re.captures_iter(&text.to_lowercase()) {
+        let day = format!("{:0>2}", &cap[1]);
+        let month_name = &cap[2].to_lowercase();
+        let year = &cap[3];
+        let nr = &cap[4];
+
+        if let Some(month_num) = map_norwegian_month(month_name) {
+            let law_id = format!("LOV-{}-{}-{}-{}", year, month_num, day, nr);
+            found_ids.insert(law_id);
+        }
+    }
+
+    found_ids.into_iter().collect()
+}
+
+fn map_norwegian_month(month: &str) -> Option<&'static str> {
+    match month {
+        "januar" => Some("01"),
+        "februar" => Some("02"),
+        "mars" => Some("03"),
+        "april" => Some("04"),
+        "mai" => Some("05"),
+        "juni" => Some("06"),
+        "juli" => Some("07"),
+        "august" => Some("08"),
+        "september" => Some("09"),
+        "oktober" => Some("10"),
+        "november" => Some("11"),
+        "desember" => Some("12"),
+        _ => None,
+    }
 }

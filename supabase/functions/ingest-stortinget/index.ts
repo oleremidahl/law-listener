@@ -20,7 +20,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const { items } = await req.json();
 
   for (const item of items) {
@@ -34,10 +33,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.error(`Error upserting item ${item.stortinget_id}:`, error);      
       continue;
     }
-
-    await sleep(1000); // Allows stortinget-law-matcher to avoid rate limiting
   }
-
   return new Response("OK", { status: 200 });
 });
 

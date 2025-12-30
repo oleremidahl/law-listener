@@ -4,7 +4,7 @@ compatibility_date = "2025-12-18"
 
 
 [triggers]
-crons = ["5 * * * *"] # 5 minutes over every hour, day in the month, every month, every day in the week 
+crons = ["0 */12 * * *"] # 0 minutes over every 12th hour, every day in the month, every month, every day in the week 
 
 [vars]
 FEED_URL = "https://www.stortinget.no/no/Stottemeny/RSS/Lovbeslutninger/"
