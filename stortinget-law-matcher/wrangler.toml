@@ -1,0 +1,21 @@
+name = "stortinget-law-matcher"
+main = "build/index.js"
+compatibility_date = "2025-12-20"
+
+[observability]
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
+
+[vars]
+LAW_MATCHER_EDGE_FUNCTION_URL = "https://fwynzlokbzycftaaeuhb.supabase.co/functions/v1/match-and-link-laws"
+
+[build]
+command = "cargo install -q worker-build@^0.7 && worker-build --release"

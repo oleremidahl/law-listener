@@ -203,6 +203,9 @@ pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) 
 }
 
 #[event(fetch)]
-pub async fn fetch(_req: Request, _env: Env, _ctx: Context) -> Result<Response> {
+pub async fn fetch(_req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    if let Err(e) = run_scheduled_job(env).await {
+        console_error!("Called job error: {:?}", e);
+    }
     Response::ok("Worker is running")
 }

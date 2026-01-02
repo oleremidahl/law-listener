@@ -20,21 +20,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
-
   const { items } = await req.json();
 
-  const { error } = await supabaseAdmin
-  .from("law_proposals")
-  .upsert(items, { 
-    onConflict: "stortinget_id",
-    ignoreDuplicates: true
-  });
-
-  if (error) {
-    console.error("Error upserting law_proposals", error);
-    return new Response("DB error", { status: 500 });
+  for (const item of items) {
+    const { error } = await supabaseAdmin
+    .from("law_proposals")
+    .upsert(item, { 
+      onConflict: "stortinget_id",
+      ignoreDuplicates: true
+    });
+    if (error) {
+      console.error(`Error upserting item ${item.stortinget_id}:`, error);      
+      continue;
+    }
   }
-
   return new Response("OK", { status: 200 });
 });
 
