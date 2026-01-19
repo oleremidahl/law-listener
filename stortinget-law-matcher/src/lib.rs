@@ -2,6 +2,19 @@ use worker::*;
 use serde::{Deserialize, Serialize};
 use regex::Regex;
 use std::collections::HashSet;
+use tracing::{info, error, debug, warn};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_web::MakeWebConsoleWriter;
+
+fn init_tracing() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(MakeWebConsoleWriter::new())
+        .with_target(false)
+        .json();
+
+    let subscriber = tracing_subscriber::registry().with(fmt_layer);
+    let _ = tracing::subscriber::set_default(subscriber);
+}
 
 #[derive(Deserialize, Serialize)]
 struct WebhookPayload {
@@ -16,16 +29,17 @@ struct LawProposal {
 
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    init_tracing();
     console_error_panic_hook::set_once();
     let mut req = req;
     
     let expected = env.secret("WEBHOOK_SHARED_SECRET")?.to_string();
     let got = req.headers().get("x-webhook-secret")?.unwrap_or_default();
     if got != expected {
+        warn!("webhook_secret_mismatch");
         return Response::error("You don't know the secret ;)))", 403);
     }
 
-    // 1. Receive Webhook from Supabase
     let payload: WebhookPayload = match req.json().await {
         Ok(p) => p,
         Err(_) => return Response::error("Invalid JSON payload", 400),
@@ -35,46 +49,50 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         Some(url) => url,
         None => return Response::ok("No link provided in record"),
     };
-    console_log!("Step 1: Webhook received");
+    info!(proposal_id = payload.record.id, "webhook_received");
 
-    // 2. Fetch content
     let html = fetch_html(&target_url).await?;
-    console_log!("Step 2: HTML fetched (length: {})", html.len());
+    debug!(html_length = html.len(), "html_fetched");
 
-    // 3. Extract Content between and 
     let extracted_section = extract_between_comments(
         &html, 
         "<!-- INNHOLD -->", 
         "<!-- /INNHOLD -->",
     ).unwrap_or_else(|| "Target markers not found".to_string());
 
-    // 4. Dumb down: Strip all remaining HTML tags to leave just the text
     let clean_text = strip_html_tags(&extracted_section);
 
-    console_log!("Extracted Clean Text: {}", clean_text);
+    debug!(clean_text_length = clean_text.len(), "html_tags_stripped");
 
-    // ... after cleaning HTML text ...
     let extracted_ids = extract_law_ids(&clean_text);
 
-    let law_ids_str = extracted_ids.join(",");
-    console_log!("Detected Law IDs: {}", law_ids_str);
+    info!(
+        extracted_ids_count = extracted_ids.len(),
+        extracted_ids = ?extracted_ids,
+        "law_ids_extracted"
+    );
 
-    // 6. Send to Supabase Edge Function
     let edge_function_url = env.var("LAW_MATCHER_EDGE_FUNCTION_URL")?.to_string();
     let matcher_secret = env.secret("LAW_MATCHER_WORKER_SECRET")?.to_string();
-    console_log!("Step 6: Sending to Edge Function at {}", edge_function_url);
+    info!(edge_function_url = %edge_function_url, "sending_to_edge_function");
+    let law_ids_str = extracted_ids.join(",");
     match send_to_edge_function(&edge_function_url, &matcher_secret, &payload.record.id, &law_ids_str).await {
-        Ok(_) => Response::ok("Linked laws successfully"),
+        Ok(_) => {
+            info!(
+                proposal_id = payload.record.id,
+                extracted_ids_count = extracted_ids.len(),
+                "laws_linked_successfully"
+            );
+            Response::ok("Linked laws successfully")
+        },
         Err(e) => {
-            console_log!("Error in edge function: {}", e);
+            error!(error = ?e, proposal_id = payload.record.id, "edge_function_error");
             Response::error("Failed to link laws", 500)
         }
     }   
 }
 
-async fn fetch_html(url: &str) -> Result<String> {
-    // Optional: add UA/Accept to reduce “bot blocking”
-    
+async fn fetch_html(url: &str) -> Result<String> {    
     let headers = Headers::new();
     headers.set("User-Agent", "law-listener/1.0")?;
     headers.set("Accept", "text/html,application/xhtml+xml")?;
@@ -82,12 +100,17 @@ async fn fetch_html(url: &str) -> Result<String> {
     init.with_method(Method::Get);
     init.with_headers(headers);
 
-
     let req = Request::new_with_init(url, &init)?;
     let mut resp = Fetch::Request(req).send().await?;
 
     if resp.status_code() >= 400 {
         let body = resp.text().await.unwrap_or_default();
+        error!(
+            status_code = resp.status_code(),
+            url = %url,
+            body_length = body.len(),
+            "fetch_html_error"
+        );
         return Err(Error::RustError(format!(
             "Fetch error {} for {}: {}",
             resp.status_code(),
@@ -109,12 +132,10 @@ fn extract_between_comments(html: &str, start: &str, end: &str) -> Option<String
     }
 }
 
-// Simple tag stripper for the "dumbed down" version
 fn strip_html_tags(html: &str) -> String {
     let mut text = String::with_capacity(html.len());
     let mut inside_tag = false;
 
-    // 1. Strip HTML tags
     for c in html.chars() {
         match c {
             '<' => inside_tag = true,
@@ -124,7 +145,6 @@ fn strip_html_tags(html: &str) -> String {
         }
     }
 
-    // 2. Replace &nbsp; and normalize whitespace (incl. \n → " ")
     let text = text
         .replace("&nbsp;", " ")
         .replace("\\r\\n", " ")
@@ -165,7 +185,7 @@ async fn send_to_edge_function(
         "extracted_ids": law_ids.split(',').map(|s| s.trim()).collect::<Vec<&str>>()
         });
     
-    console_log!("Sending to edge function: {}", body_json.to_string());
+    debug!(body = %body_json, "sending_to_edge_function_payload");
 
     let mut init = RequestInit::new();
     init
@@ -173,13 +193,16 @@ async fn send_to_edge_function(
         .with_headers(headers)
         .with_body(Some(wasm_bindgen::JsValue::from_str(&body_json.to_string())));
 
-
     let req = Request::new_with_init(url, &init)?;
     
-    // Perform the fetch and await the response
     let resp = Fetch::Request(req).send().await?;
 
     if resp.status_code() != 200 {
+        error!(
+            status_code = resp.status_code(),
+            proposal_id = proposal_id,
+            "edge_function_request_failed"
+        );
         return Err(Error::from(format!("Edge function returned status {}", resp.status_code())));
     }
 

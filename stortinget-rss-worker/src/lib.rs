@@ -4,6 +4,20 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use std::str;
+use tracing::info;
+use tracing::error;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_web::MakeWebConsoleWriter;
+
+fn init_tracing() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(MakeWebConsoleWriter::new())
+        .with_target(false)
+        .json();
+
+    let subscriber = tracing_subscriber::registry().with(fmt_layer);
+    let _ = tracing::subscriber::set_default(subscriber);
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct LawProposal {
@@ -105,7 +119,7 @@ fn parse_rss_items(xml: &str) -> Result<Vec<LawProposal>> {
                     }
                     _ => {}
                 }
-                current_tag.clear(); // Tømmer taggen etter hver slutt-tag for sikkerhet
+                current_tag.clear();
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(Error::RustError(format!("XML parse error: {:?}", e))),
@@ -125,12 +139,10 @@ fn parse_date(date_str: &str) -> Option<String> {
     None
 }
 
-// Internal async job logic that can use `Result` and `?`.
 async fn run_scheduled_job(env: Env) -> Result<()> {
     let start = Date::now();
     let kv = env.kv("STORTINGET_STATE")?;
 
-    // 1. Fetch Config & Feed
     let feed_url = env.var("FEED_URL")?.to_string();
     let edge_function_url = env.var("EDGE_FUNCTION_URL")?.to_string();
     let worker_secret = env.var("STORTINGET_WORKER_SECRET")?.to_string();
@@ -143,7 +155,6 @@ async fn run_scheduled_job(env: Env) -> Result<()> {
         return Ok(());
     }
 
-    // 2. Determine what is actually new
     let last_seen_url: Option<String> = kv.get("latest_seen_url").text().await?;
     let mut new_items = Vec::new();
 
@@ -157,13 +168,11 @@ async fn run_scheduled_job(env: Env) -> Result<()> {
         new_items.push(item);
     }
 
-    // 3. Abort if no new data
     if new_items.is_empty() {
-        console_log!("No new items found. Aborting execution.");
+        info!("no_new_items_found");
         return Ok(());
     }
 
-    // 4. Send only new items to Edge Function
     let payload = serde_json::json!({ "items": new_items });
     let payload_str = serde_json::to_string(&payload)
         .map_err(|e| Error::RustError(format!("JSON error: {:?}", e)))?;
@@ -180,32 +189,38 @@ async fn run_scheduled_job(env: Env) -> Result<()> {
     let edge_resp = Fetch::Request(Request::new_with_init(&edge_function_url, &edge_init)?).send().await?;
     
     if edge_resp.status_code() >= 400 {
+        error!(
+            status_code = edge_resp.status_code(),
+            "edge_function_ingestion_failed"
+        );
         return Err(Error::RustError("Edge function ingestion failed".into()));
     }
 
-    // 5. Update KV with the newest link from this batch
-    // (new_items[0] is the top-most/newest item in the feed)
     if let Some(newest_link) = &new_items[0].stortinget_link {
         kv.put("latest_seen_url", newest_link)?.execute().await?;
     }
     let total_time = Date::now() - start;
-    console_log!("Total time taken: {}ms", total_time);
-
-    console_log!("Sent {} new items to edge function.", new_items.len());
+    info!(
+        items_count = new_items.len(),
+        duration_ms = total_time,
+        "job_completed"
+    );
     Ok(())
 }
 
 #[event(scheduled)]
 pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    init_tracing();
     if let Err(e) = run_scheduled_job(env).await {
-        console_error!("scheduled job error: {:?}", e);
+        error!(error = ?e, "scheduled_job_error");
     }
 }
 
 #[event(fetch)]
 pub async fn fetch(_req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    init_tracing();
     if let Err(e) = run_scheduled_job(env).await {
-        console_error!("Called job error: {:?}", e);
+        error!(error = ?e, "fetch_handler_error");
     }
     Response::ok("Worker is running")
 }

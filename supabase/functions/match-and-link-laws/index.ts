@@ -20,7 +20,6 @@ Deno.serve(async (req) => {
     
     console.log(`Linking proposal ${proposal_id} to legacy IDs:`, extracted_ids);
 
-    // Initialize Supabase Admin Client (using service role to bypass RLS)
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
