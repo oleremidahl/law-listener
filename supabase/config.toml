@@ -320,23 +320,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 verify_jwt = false
 
 [functions.match-and-link-laws]
-enabled = true
-verify_jwt = true
-import_map = "./functions/match-and-link-laws/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/match-and-link-laws/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/match-and-link-laws/*.html" ]
+verify_jwt = false
 
 [functions.upsert-test-proposal]
-enabled = true
-verify_jwt = true
-import_map = "./functions/upsert-test-proposal/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/upsert-test-proposal/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/upsert-test-proposal/*.html" ]
+verify_jwt = false
