@@ -2,6 +2,5 @@
 # Local environment and editor config
 .env
 .env.*
-.cursorrules
+.cursor/
 nl
-
