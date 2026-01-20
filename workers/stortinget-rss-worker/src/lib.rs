@@ -105,7 +105,7 @@ fn parse_rss_items(xml: &str) -> Result<Vec<LawProposal>> {
                     }
                     _ => {}
                 }
-                current_tag.clear(); // Tømmer taggen etter hver slutt-tag for sikkerhet
+                current_tag.clear();
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(Error::RustError(format!("XML parse error: {:?}", e))),
