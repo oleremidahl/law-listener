@@ -25,7 +25,7 @@ jobs:
         working-directory: workers/stortinget-rss-worker
         run: |
           cargo install -q worker-build@^0.7 && worker-build --release
-          wrangler publish
+          wrangler deploy
         env:
           WRANGLER_API_TOKEN: ${{ secrets.WRANGLER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -34,7 +34,7 @@ jobs:
         working-directory: workers/stortinget-law-matcher
         run: |
           cargo install -q worker-build@^0.7 && worker-build --release
-          wrangler publish
+          wrangler deploy
         env:
           WRANGLER_API_TOKEN: ${{ secrets.WRANGLER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
