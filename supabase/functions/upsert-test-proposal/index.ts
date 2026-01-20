@@ -1,43 +1,45 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import * as Sentry from "https://esm.sh/@sentry/deno@7.90.0";
+import { Logger } from "../shared/logger.ts";
 
-Deno.serve(async (req) => {
-  // Use local environment variables provided by the Supabase CLI
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  )
+// Initialize Sentry once at module load
+Sentry.init({
+  dsn: Deno.env.get("SENTRY_DSN"),
+  environment: Deno.env.get("DENO_ENV") || "production",
+  tracesSampleRate: 0.1,
+});
+
+Deno.serve(async (req: Request) => {
+  const logger = new Logger(
+    "upsert-test-proposal",
+    req.headers.get("x-request-id") || undefined
+  );
+  const requestId = logger.getRequestId();
 
   try {
-    // Test data entry
-    const testEntry = {
-      title: "Test Proposal",
-      stortinget_link: "https://www.stortinget.no/no/Saker-og-publikasjoner/Vedtak/Beslutninger/Lovvedtak/2025-2026/vedtak-202526-017/?utm_medium=rss&utm_source=www.stortinget.no&utm_campaign=Lovvedtak"
-    }
+    logger.info("test_function_started");
 
-    const { error: deleteError } = await supabase
-      .from('law_proposals')
-      .delete()
-      .eq('title', 'Test Proposal');
+    // Throw error to test Sentry integration
+    throw new Error("TEST_ERROR: This is a test error for Sentry integration");
 
-    if (deleteError) throw deleteError;
-
-    const { data, error } = await supabase
-      .from('law_proposals')
-      .upsert(testEntry, { 
-        onConflict: 'stortinget_id' 
-      })
-      .select()
-
-    if (error) throw error
-
-    return new Response(JSON.stringify({ message: "Upsert successful", data }), {
-      headers: { "Content-Type": "application/json" },
-      status: 200,
-    })
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      headers: { "Content-Type": "application/json" },
-      status: 500,
-    })
+    await logger.fatal(
+      "sentry_test_error",
+      err as Error,
+      { request_id: requestId }
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Internal error",
+        request_id: requestId,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-ID": requestId,
+        },
+      }
+    );
   }
-})
+});
