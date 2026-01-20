@@ -125,7 +125,7 @@ fn parse_date(date_str: &str) -> Option<String> {
     None
 }
 
-// Internal async job logic that can use `Result` and `?`.
+// Internal async job logic that can use `Result` and `?`..
 async fn run_scheduled_job(env: Env) -> Result<()> {
     let start = Date::now();
     let kv = env.kv("STORTINGET_STATE")?;
