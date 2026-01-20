@@ -27,7 +27,7 @@ jobs:
           cargo install -q worker-build@^0.7 && worker-build --release
           wrangler deploy
         env:
-          WRANGLER_API_TOKEN: ${{ secrets.WRANGLER_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.WRANGLER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy stortinget-law-matcher
@@ -36,7 +36,7 @@ jobs:
           cargo install -q worker-build@^0.7 && worker-build --release
           wrangler deploy
         env:
-          WRANGLER_API_TOKEN: ${{ secrets.WRANGLER_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.WRANGLER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Log deployment status
