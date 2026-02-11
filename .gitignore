@@ -4,3 +4,14 @@
 .env.*
 .cursor/
 nl
+
+# Node / frontend
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
