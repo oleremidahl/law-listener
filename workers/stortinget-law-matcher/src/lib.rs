@@ -576,7 +576,7 @@ fn is_valid_date(year: u32, month: u32, day: u32) -> bool {
     if month < 1 || month > 12 {
         return false;
     }
-    
+
     let days_in_month = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -590,7 +590,7 @@ fn is_valid_date(year: u32, month: u32, day: u32) -> bool {
         }
         _ => return false,
     };
-    
+
     day >= 1 && day <= days_in_month
 }
 
