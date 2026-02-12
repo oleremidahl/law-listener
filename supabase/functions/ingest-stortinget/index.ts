@@ -202,6 +202,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
         if (classified.code === "23505") {
           // Treat duplicate key as idempotent success.
           succeeded += 1;
+          logger.debug("item_upsert_duplicate", {
+            item_id: itemId,
+            position: index + 1,
+            classification: "expected_error",
+            retryable: false,
+            error_code: classified.code,
+          });
         } else {
           failures.push({
             stortinget_id: itemId,
@@ -209,15 +216,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
             message_safe: classified.message_safe,
             retryable: classified.retryable,
           });
+          logger.warn("item_upsert_failed", {
+            item_id: itemId,
+            position: index + 1,
+            classification: classified.classification,
+            retryable: classified.retryable,
+            error_code: classified.code,
+          });
         }
-
-        logger.warn("item_upsert_failed", {
-          item_id: itemId,
-          position: index + 1,
-          classification: classified.classification,
-          retryable: classified.retryable,
-          error_code: classified.code,
-        });
       }
     }
 

@@ -30,6 +30,7 @@ const REQUEST_ID_HEADER = "x-request-id";
 const RESPONSE_REQUEST_ID_HEADER = "X-Request-ID";
 const LOG_LEVEL_ENV = "LOG_LEVEL";
 const STRING_MAX_LENGTH = 512;
+const SAFE_SENSITIVE_SUFFIX_PATTERN = /(?:_|-)(type|length|count)$/i;
 
 const SENSITIVE_KEY_PATTERN =
   /(secret|token|password|authorization|cookie|api[-_]?key|private[-_]?key|dsn|payload|body|html|content|text)/i;
@@ -99,7 +100,7 @@ function sanitizeValue(value: unknown): unknown {
     return `${value.name}: ${sanitizeString(value.message)}`;
   }
 
-  if (value && typeof value === "object") {
+  if (typeof value === "object") {
     return "[object]";
   }
 
@@ -116,7 +117,10 @@ export function sanitizeContext(
       continue;
     }
 
-    if (SENSITIVE_KEY_PATTERN.test(key)) {
+    if (
+      SENSITIVE_KEY_PATTERN.test(key) &&
+      !SAFE_SENSITIVE_SUFFIX_PATTERN.test(key)
+    ) {
       sanitized[key] = "[redacted]";
       continue;
     }

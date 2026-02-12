@@ -31,11 +31,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Cargo check
         run: cargo check --manifest-path ${{ matrix.worker }}/Cargo.toml
 
       - name: Cargo test
         run: cargo test --manifest-path ${{ matrix.worker }}/Cargo.toml
+
+      - name: Cargo check (wasm32)
+        run: cargo check --target wasm32-unknown-unknown --manifest-path ${{ matrix.worker }}/Cargo.toml
 
   edge-checks:
     runs-on: ubuntu-latest

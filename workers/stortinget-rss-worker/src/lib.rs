@@ -207,6 +207,22 @@ async fn run_scheduled_job(env: Env, request_id: &str, trigger: &str) -> Result<
     let worker_secret = env.var("STORTINGET_WORKER_SECRET")?.to_string();
 
     let mut resp = Fetch::Url(feed_url.parse()?).send().await?;
+    let feed_status = resp.status_code();
+    if !(200..300).contains(&feed_status) {
+        let body = resp.text().await.unwrap_or_default();
+        error!(
+            event = "feed_fetch_failed",
+            function = FUNCTION_NAME,
+            request_id = %request_id,
+            status_code = feed_status,
+            body_length = body.len()
+        );
+        return Err(Error::RustError(format!(
+            "Feed fetch failed with status {}",
+            feed_status
+        )));
+    }
+
     let body_text = resp.text().await?;
     let all_items = parse_rss_items(&body_text)?;
 
