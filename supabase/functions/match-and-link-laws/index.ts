@@ -133,6 +133,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     if (cleanIds.length === 0) {
+      // Only mark as new law if extraction was successful but found no IDs
+      // If enforcement_date is PARSER_FEIL, the extraction failed and we shouldn't mark as new law
+      const isExtractionFailure = enforcementDate === "PARSER_FEIL";
+
+      if (isExtractionFailure) {
+        logger.warn("extraction_failed_skipping_update", {
+          proposal_id: proposalId,
+          enforcement_date: enforcementDate,
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            message: "Extraction failed, skipped update",
+            proposal_id: proposalId,
+          },
+          200,
+          requestId,
+        );
+      }
+
       logger.info("no_ids_extracted", {
         proposal_id: proposalId,
         enforcement_date: enforcementDate,
