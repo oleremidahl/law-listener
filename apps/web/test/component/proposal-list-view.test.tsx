@@ -119,6 +119,40 @@ describe("ProposalListView", () => {
     ).toBeInTheDocument()
   })
 
+  it("offers recovery when page is out of range but matches still exist", async () => {
+    searchValue = "page=9"
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        createPayload({
+          items: [],
+          pagination: {
+            page: 9,
+            pageSize: 20,
+            totalCount: 41,
+            totalPages: 3,
+          },
+        })
+      )
+    )
+
+    const user = userEvent.setup()
+
+    render(<ProposalListView />)
+
+    expect(
+      await screen.findByText("Siden du åpnet er utenfor tilgjengelige sider.")
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("Ingen treff for gjeldende filtre.")
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Gå til siste side" }))
+
+    expect(pushMock).toHaveBeenCalledWith("/?page=3")
+  })
+
   it("shows readable API error feedback", async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(

@@ -237,6 +237,11 @@ export function ProposalListView() {
     visiblePages[visiblePages.length - 1] < (pagination?.totalPages ?? 1)
 
   const totalRows = payload?.pagination.totalCount ?? 0
+  const hasOutOfRangePage =
+    payload !== null &&
+    payload.items.length === 0 &&
+    payload.pagination.totalCount > 0 &&
+    payload.pagination.page > payload.pagination.totalPages
 
   return (
     <section className="space-y-6">
@@ -502,6 +507,31 @@ export function ProposalListView() {
                 </Pagination>
               </div>
             ) : null}
+          </CardContent>
+        </Card>
+      ) : hasOutOfRangePage && payload ? (
+        <Card className="border-zinc-300/90 bg-white/95 shadow-sm">
+          <CardContent className="py-12 text-center text-sm text-zinc-600">
+            <p className="font-medium text-zinc-800">
+              Siden du åpnet er utenfor tilgjengelige sider.
+            </p>
+            <p className="mt-1">
+              Det finnes fortsatt treff for filtrene dine.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button
+                onClick={() =>
+                  pushQuery(
+                    withPage(toSearchParams(query), payload.pagination.totalPages)
+                  )
+                }
+              >
+                Gå til siste side
+              </Button>
+              <Button variant="outline" onClick={handleReset}>
+                Nullstill filtre
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (

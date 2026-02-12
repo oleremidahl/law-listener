@@ -20,11 +20,52 @@ export async function listProposals(query: ListQuery): Promise<ProposalListRespo
   const start = getOffset(query.page, query.pageSize)
   const end = start + query.pageSize - 1
 
+  let countStatement = supabase
+    .from("law_proposals")
+    .select("id", { count: "exact", head: true })
+
+  if (query.q) {
+    countStatement = countStatement.ilike("feed_description", `%${query.q}%`)
+  }
+
+  if (query.status !== "all") {
+    countStatement = countStatement.eq("status", query.status)
+  }
+
+  if (query.from) {
+    countStatement = countStatement.gte("decision_date", query.from)
+  }
+
+  if (query.to) {
+    countStatement = countStatement.lte("decision_date", query.to)
+  }
+
+  const { count, error: countError } = await countStatement
+
+  if (countError) {
+    throw createListError("Could not fetch proposals count", countError)
+  }
+
+  const totalCount = count ?? 0
+  const totalPages = getTotalPages(totalCount, query.pageSize)
+
+  // Avoid high-offset data queries when page is outside the available range.
+  if (totalCount === 0 || start >= totalCount) {
+    return {
+      items: [],
+      pagination: {
+        page: query.page,
+        pageSize: query.pageSize,
+        totalCount,
+        totalPages,
+      },
+    }
+  }
+
   let statement = supabase
     .from("law_proposals")
     .select(
-      "id,title,feed_description,status,decision_date,stortinget_link,lovdata_link,created_at",
-      { count: "exact" }
+      "id,title,feed_description,status,decision_date,stortinget_link,lovdata_link,created_at"
     )
     .order("decision_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -46,7 +87,7 @@ export async function listProposals(query: ListQuery): Promise<ProposalListRespo
     statement = statement.lte("decision_date", query.to)
   }
 
-  const { data, error, count } = await statement
+  const { data, error } = await statement
 
   if (error) {
     throw createListError("Could not fetch proposals", error)
@@ -62,15 +103,13 @@ export async function listProposals(query: ListQuery): Promise<ProposalListRespo
     lovdata_link: item.lovdata_link,
   }))
 
-  const totalCount = count ?? 0
-
   return {
     items,
     pagination: {
       page: query.page,
       pageSize: query.pageSize,
       totalCount,
-      totalPages: getTotalPages(totalCount, query.pageSize),
+      totalPages,
     },
   }
 }
