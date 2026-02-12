@@ -1,0 +1,15 @@
+{
+  "name": "law-listener",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "start": "pnpm --filter web start",
+    "lint": "pnpm --filter web lint",
+    "typecheck": "pnpm --filter web typecheck",
+    "test:unit": "pnpm --filter web test:unit",
+    "test:component": "pnpm --filter web test:component",
+    "test:e2e:smoke": "pnpm --filter web test:e2e:smoke"
+  }
+}
