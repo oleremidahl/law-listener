@@ -1,3 +1,7 @@
 {
-  "imports": {}
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+    "@sentry/deno": "https://esm.sh/@sentry/deno@7.90.0"
+  }
 }

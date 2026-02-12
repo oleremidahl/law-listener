@@ -1,0 +1,7 @@
+{
+  "version": "5",
+  "remote": {
+    "https://esm.sh/@sentry/deno@7.90.0": "9f450d80acce491cca7f49de2771a835b3f25e9462df331807f5cf7be3c32833",
+    "https://esm.sh/@sentry/deno@7.90.0/denonext/deno.mjs": "8611f45905bed151bd5fca58cfdc4169293a23c6ed4f7e93ae33c96cade69ded"
+  }
+}
