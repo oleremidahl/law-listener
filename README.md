@@ -1,139 +1,51 @@
 # Law Listener
 
-Law Listener ingests Norwegian law decisions from Stortinget, enriches them by linking related legal documents, and serves a public read-only frontend for browsing proposals and links.
+Law Listener tracks Norwegian law decisions, enriches them with linked legal documents, and presents the result in a public read-only web interface.
 
-## Architecture
+## Project Summary
 
-- `workers/stortinget-rss-worker`: Cloudflare Rust worker that polls the Stortinget RSS feed and forwards new entries to Supabase Edge Function ingestion.
-- `workers/stortinget-law-matcher`: Cloudflare Rust worker that receives webhook events, extracts law IDs from proposal pages, and calls the matcher Edge Function.
-- `supabase/functions/ingest-stortinget`: Edge Function that upserts proposals into `law_proposals`.
-- `supabase/functions/match-and-link-laws`: Edge Function that links proposals to `legal_documents` via `proposal_targets`.
-- `supabase/functions/upsert-test-proposal`: Edge test/utility function for controlled DB upsert checks.
-- `apps/web`: Next.js frontend for public browsing (`/`, `/proposal/[id]`).
+The project is built as a pipeline:
 
-## Repository Layout
+1. A scheduled Cloudflare worker reads the Stortinget RSS feed.
+2. New proposals are ingested into Supabase.
+3. A matcher worker + edge function extract legal references and link proposals to legal documents.
+4. A Next.js frontend exposes searchable proposal and detail views.
 
-- `apps/web`: frontend app and frontend tests.
-- `workers`: Cloudflare Rust workers.
-- `supabase/functions`: Supabase Edge Functions.
-- `.github/workflows`: CI and deployment pipelines.
+## Current Repository Structure
 
-## Prerequisites
+- `apps/web`: public frontend (Next.js + shadcn/ui).
+- `workers/stortinget-rss-worker`: feed ingestion worker (Rust/Cloudflare).
+- `workers/stortinget-law-matcher`: proposal matcher worker (Rust/Cloudflare).
+- `supabase/functions`: edge functions for ingesting and matching/linking.
+- `.github/workflows`: CI and deployment workflows.
 
-- Node.js `>= 20.9.0` (Node 22 recommended).
-- `pnpm` `9.15.4`.
-- Rust stable toolchain (`cargo`).
-- Deno 2.x.
-- Supabase CLI.
-- Wrangler CLI.
+## Runtime Characteristics
 
-## Environment Setup
+- Read-only frontend data access.
+- Structured logging across workers and edge functions.
+- Request ID propagation (`x-request-id` in, `X-Request-ID` out).
+- Edge-function error reporting to Sentry (fail-open).
 
-Create environment files locally (do not commit secrets):
+## Frontend Hosting
 
-- `apps/web/.env.local`:
+The frontend hosting target is intentionally left open for now.
+Deployment hosting/provider will be finalized separately.
 
-```bash
-NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sb_publishable_key>
-```
+## CI/CD at a Glance
 
-- `supabase/functions/.env` (example keys):
+- `frontend-ci.yml`: frontend lint, typecheck, unit/component/e2e smoke.
+- `observability-ci.yml`: workers Rust checks/tests + wasm target check, edge Deno checks/tests.
+- `deploy-workers.yml`: deploy Cloudflare workers on `master` changes under `workers/**`.
+- `deploy-edge-functions.yml`: deploy Supabase edge functions on `master` changes under `supabase/functions/**`.
 
-```bash
-STORTINGET_WORKER_SECRET=<secret>
-LAW_MATCHER_WORKER_SECRET=<secret>
-SENTRY_DSN=<dsn>
-```
+## Documentation
 
-## Quick Start
-
-Install dependencies:
-
-```bash
-pnpm install
-```
-
-Run frontend:
-
-```bash
-pnpm dev
-```
-
-Frontend docs are in `apps/web/README.md`.
-
-## Common Commands
-
-Frontend:
-
-```bash
-pnpm lint
-pnpm typecheck
-pnpm test:unit
-pnpm test:component
-pnpm test:e2e:smoke
-```
-
-Workers:
-
-```bash
-cargo check --manifest-path workers/stortinget-rss-worker/Cargo.toml
-cargo test --manifest-path workers/stortinget-rss-worker/Cargo.toml
-cargo check --manifest-path workers/stortinget-law-matcher/Cargo.toml
-cargo test --manifest-path workers/stortinget-law-matcher/Cargo.toml
-```
-
-Edge functions:
-
-```bash
-deno fmt --check supabase/functions
-deno lint supabase/functions
-deno test --allow-env supabase/functions/shared/logger_test.ts
-```
-
-## Testing Matrix
-
-- Frontend: Vitest unit/component + Playwright smoke tests.
-- Workers: Rust unit tests in `src/lib.rs` for parsing/extraction/request-id helpers.
-- Edge functions: Deno tests for shared logger helpers and response/request-id utilities.
-
-## Observability
-
-- Structured logging is enabled in workers and edge functions.
-- Request IDs are propagated via `x-request-id` and returned as `X-Request-ID`.
-- Edge function errors/fatals report to Sentry (`SENTRY_DSN`) with fail-open behavior.
-- Redaction policy blocks sensitive keys while keeping safe metric fields (for example `*_type`, `*_length`, `*_count`).
-
-## CI/CD
-
-- `frontend-ci.yml`: lint, typecheck, unit/component/e2e for `apps/web` changes.
-- `observability-ci.yml`: worker Rust checks/tests + wasm32 check, and edge Deno fmt/lint/test.
-- `deploy-workers.yml`: deploy Cloudflare workers on push to `master` when `workers/**` changes.
-- `deploy-edge-functions.yml`: deploy Supabase Edge Functions on push to `master` when `supabase/functions/**` changes.
-
-## Troubleshooting
-
-Node version mismatch:
-
-```bash
-node -v
-```
-
-If below required version, upgrade Node before running Next.js.
-
-Deno command not found:
-
-- Ensure Deno is installed and on `PATH`.
-- Verify with `deno --version`.
-
-Deno dependency/type resolution issues:
-
-- This repo uses a root `deno.json` with import maps and `nodeModulesDir: "auto"`.
-- Re-run the Deno commands from repo root.
+- Frontend app docs: `apps/web/README.md`
+- Self-hosting guide (your own Supabase/Cloudflare): `SELF_HOSTING.md`
 
 ## Contributing
 
 - Branch from `master`.
-- Keep changes scoped by domain (frontend vs workers/edge).
-- Ensure relevant CI checks pass before PR merge.
-- Do not log secrets or raw sensitive payload content.
+- Keep changes scoped by domain when possible.
+- Ensure relevant CI checks pass before merge.
+- Never log secrets or raw sensitive payload/body content.
