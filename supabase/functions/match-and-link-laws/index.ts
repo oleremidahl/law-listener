@@ -8,10 +8,7 @@ import {
   Logger,
   withTimeout,
 } from "../shared/logger.ts";
-import {
-  normalizeEnforcementDate,
-  normalizeExtractedIds,
-} from "./payload.ts";
+import { normalizeEnforcementDate, normalizeExtractedIds } from "./payload.ts";
 
 const SUPABASE_TIMEOUT_MS = 10_000;
 

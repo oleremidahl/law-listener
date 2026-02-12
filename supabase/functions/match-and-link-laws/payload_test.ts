@@ -1,7 +1,4 @@
-import {
-  normalizeEnforcementDate,
-  normalizeExtractedIds,
-} from "./payload.ts";
+import { normalizeEnforcementDate, normalizeExtractedIds } from "./payload.ts";
 
 Deno.test("normalizeEnforcementDate accepts all sentinel tokens", () => {
   const values = [
