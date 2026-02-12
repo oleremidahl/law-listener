@@ -1,0 +1,65 @@
+name: Observability CI
+
+on:
+  pull_request:
+    paths:
+      - "workers/**"
+      - "supabase/functions/**"
+      - ".github/workflows/observability-ci.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "workers/**"
+      - "supabase/functions/**"
+      - ".github/workflows/observability-ci.yml"
+
+jobs:
+  rust-checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        worker:
+          - workers/stortinget-rss-worker
+          - workers/stortinget-law-matcher
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cargo check
+        run: cargo check --manifest-path ${{ matrix.worker }}/Cargo.toml
+
+      - name: Cargo test
+        run: cargo test --manifest-path ${{ matrix.worker }}/Cargo.toml
+
+      - name: Cargo check (wasm32)
+        run: cargo check --target wasm32-unknown-unknown --manifest-path ${{ matrix.worker }}/Cargo.toml
+
+  edge-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Deno fmt
+        run: deno fmt --check supabase/functions
+
+      - name: Deno lint
+        run: deno lint supabase/functions
+
+      - name: Deno tests
+        run: deno test --allow-env supabase/functions/shared/logger_test.ts
