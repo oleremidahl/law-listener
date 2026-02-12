@@ -8,12 +8,17 @@ import {
   Logger,
   withTimeout,
 } from "../shared/logger.ts";
+import {
+  normalizeEnforcementDate,
+  normalizeExtractedIds,
+} from "./payload.ts";
 
 const SUPABASE_TIMEOUT_MS = 10_000;
 
 type RequestPayload = {
   proposal_id?: unknown;
   extracted_ids?: unknown;
+  enforcement_date?: unknown;
 };
 
 type MatchErrorClassification = {
@@ -54,18 +59,6 @@ function classifyMatchError(error: unknown): MatchErrorClassification {
     retryable: true,
     classification: "infrastructure_error",
   };
-}
-
-function normalizeExtractedIds(value: unknown): string[] | null {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string");
-  }
-
-  if (typeof value === "string") {
-    return value.split(",").map((entry) => entry.trim());
-  }
-
-  return null;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -118,12 +111,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ? payload.proposal_id.trim()
       : "";
     const extractedIds = normalizeExtractedIds(payload.extracted_ids);
+    const enforcementDate = normalizeEnforcementDate(payload.enforcement_date);
 
-    if (!proposalId || extractedIds === null) {
+    if (!proposalId || extractedIds === null || !enforcementDate) {
       logger.warn("invalid_payload", {
         classification: "expected_error",
         has_proposal_id: Boolean(proposalId),
         extracted_ids_type: typeof payload.extracted_ids,
+        has_enforcement_date: Boolean(enforcementDate),
       });
 
       return errorResponse(
@@ -143,6 +138,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (cleanIds.length === 0) {
       logger.info("no_ids_extracted", {
         proposal_id: proposalId,
+        enforcement_date: enforcementDate,
         classification: "expected_error",
       });
 
@@ -150,7 +146,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const updateResult = await withTimeout(
           supabase
             .from("law_proposals")
-            .update({ is_new_law: true })
+            .update({ is_new_law: true, enforcement_date: enforcementDate })
             .eq("id", proposalId),
           SUPABASE_TIMEOUT_MS,
         );
@@ -164,6 +160,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
         logger.error("mark_new_law_failed", error, {
           proposal_id: proposalId,
+          enforcement_date: enforcementDate,
           classification: classified.classification,
           retryable: classified.retryable,
           code: classified.code,
@@ -176,11 +173,40 @@ Deno.serve(async (req: Request): Promise<Response> => {
         {
           status: "marked_as_new",
           proposal_id: proposalId,
+          enforcement_date: enforcementDate,
           request_id: requestId,
         },
         200,
         requestId,
       );
+    }
+
+    try {
+      const enforcementUpdateResult = await withTimeout(
+        supabase
+          .from("law_proposals")
+          .update({ enforcement_date: enforcementDate })
+          .eq("id", proposalId),
+        SUPABASE_TIMEOUT_MS,
+      );
+
+      const enforcementUpdateError =
+        (enforcementUpdateResult as { error?: unknown }).error;
+      if (enforcementUpdateError) {
+        throw enforcementUpdateError;
+      }
+    } catch (error) {
+      const classified = classifyMatchError(error);
+
+      logger.error("enforcement_update_failed", error, {
+        proposal_id: proposalId,
+        enforcement_date: enforcementDate,
+        classification: classified.classification,
+        retryable: classified.retryable,
+        code: classified.code,
+      });
+
+      return errorResponse(500, "Internal error", requestId, classified.code);
     }
 
     let documents: { id: string }[] = [];
@@ -206,6 +232,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       logger.error("fetch_documents_failed", error, {
         proposal_id: proposalId,
         searched_ids_count: cleanIds.length,
+        enforcement_date: enforcementDate,
         classification: classified.classification,
         retryable: classified.retryable,
         code: classified.code,
@@ -218,6 +245,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       logger.info("no_matches_found", {
         proposal_id: proposalId,
         searched_ids_count: cleanIds.length,
+        enforcement_date: enforcementDate,
         classification: "expected_error",
       });
 
@@ -225,6 +253,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         {
           status: "ids_not_found_in_db",
           proposal_id: proposalId,
+          enforcement_date: enforcementDate,
           searched: cleanIds.length,
           found: 0,
           request_id: requestId,
@@ -254,6 +283,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       logger.info("linking_completed", {
         proposal_id: proposalId,
+        enforcement_date: enforcementDate,
         searched_ids_count: cleanIds.length,
         found_count: documents.length,
         linked_count: linkEntries.length,
@@ -263,6 +293,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         {
           status: "linked",
           proposal_id: proposalId,
+          enforcement_date: enforcementDate,
           linked_count: linkEntries.length,
           request_id: requestId,
         },
@@ -274,6 +305,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       logger.error("linking_failed", error, {
         proposal_id: proposalId,
+        enforcement_date: enforcementDate,
         found_count: documents.length,
         classification: classified.classification,
         retryable: classified.retryable,

@@ -65,7 +65,7 @@ export async function listProposals(query: ListQuery): Promise<ProposalListRespo
   let statement = supabase
     .from("law_proposals")
     .select(
-      "id,title,feed_description,status,decision_date,stortinget_link,lovdata_link,created_at"
+      "id,title,feed_description,status,decision_date,enforcement_date,stortinget_link,lovdata_link,created_at"
     )
     .order("decision_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -99,6 +99,7 @@ export async function listProposals(query: ListQuery): Promise<ProposalListRespo
     feed_description: item.feed_description,
     status: item.status,
     decision_date: item.decision_date,
+    enforcement_date: item.enforcement_date,
     stortinget_link: item.stortinget_link,
     lovdata_link: item.lovdata_link,
   }))

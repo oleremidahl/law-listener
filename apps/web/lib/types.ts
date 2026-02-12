@@ -18,6 +18,7 @@ export interface ProposalListItem {
   feed_description: string | null
   status: ProposalStatus
   decision_date: string | null
+  enforcement_date: string | null
   stortinget_link: string | null
   lovdata_link: string | null
 }
