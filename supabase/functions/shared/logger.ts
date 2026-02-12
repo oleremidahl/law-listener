@@ -1,4 +1,4 @@
-import * as Sentry from "@sentry/deno";
+import * as Sentry from "https://esm.sh/@sentry/deno@7.90.0";
 
 export interface LogContext {
   [key: string]: unknown;
