@@ -162,51 +162,56 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         proposal_id = proposal_id.as_str()
     );
 
-    let (extracted_ids, enforcement_result) = match target_url.as_deref() {
-        Some(url) => match fetch_clean_text_with_retry(url, &request_id).await {
-            Ok(clean_text) => {
-                let extracted_ids = extract_law_ids(&clean_text);
-                let enforcement_result = extract_enforcement_date(&clean_text);
+    // Return early if there's no link - cannot extract without a source
+    let Some(url) = target_url.as_deref() else {
+        warn!(
+            event = "missing_link",
+            function = FUNCTION_NAME,
+            request_id = %request_id,
+            proposal_id = proposal_id.as_str()
+        );
+        return response_with_request_id(
+            Response::ok("Skipped: no stortinget_link")?,
+            &request_id,
+        );
+    };
 
-                info!(
-                    event = "law_ids_extracted",
-                    function = FUNCTION_NAME,
-                    request_id = %request_id,
-                    proposal_id = proposal_id.as_str(),
-                    extracted_ids_count = extracted_ids.len()
-                );
-
-                (extracted_ids, enforcement_result)
-            }
-            Err(fetch_error) => {
-                error!(
-                    event = "fetch_extract_failed_after_retries",
-                    function = FUNCTION_NAME,
-                    request_id = %request_id,
-                    proposal_id = proposal_id.as_str(),
-                    stortinget_link = url,
-                    error = ?fetch_error
-                );
-                (Vec::new(), parser_fail_result())
-            }
-        },
-        None => {
-            warn!(
-                event = "missing_link",
+    // Fetch and parse the text, return early on failure
+    let clean_text = match fetch_clean_text_with_retry(url, &request_id).await {
+        Ok(text) => text,
+        Err(fetch_error) => {
+            error!(
+                event = "fetch_extract_failed_after_retries",
                 function = FUNCTION_NAME,
                 request_id = %request_id,
-                proposal_id = proposal_id.as_str()
+                proposal_id = proposal_id.as_str(),
+                stortinget_link = url,
+                error = ?fetch_error
             );
-            (Vec::new(), parser_fail_result())
+            return response_with_request_id(
+                Response::error("Failed to fetch source text", 500)?,
+                &request_id,
+            );
         }
     };
+
+    let extracted_ids = extract_law_ids(&clean_text);
+    let enforcement_result = extract_enforcement_date(&clean_text);
+
+    info!(
+        event = "law_ids_extracted",
+        function = FUNCTION_NAME,
+        request_id = %request_id,
+        proposal_id = proposal_id.as_str(),
+        extracted_ids_count = extracted_ids.len()
+    );
 
     info!(
         event = "enforcement_derived",
         function = FUNCTION_NAME,
         request_id = %request_id,
         proposal_id = proposal_id.as_str(),
-        stortinget_link = target_url.as_deref().unwrap_or("none"),
+        stortinget_link = url,
         enforcement_date = enforcement_result.value.as_str(),
         enforcement_source = enforcement_result.source,
         match_snippet = enforcement_result.matched_snippet.as_str()
@@ -430,13 +435,28 @@ fn extract_law_ids(text: &str) -> Vec<String> {
     let mut found_ids = HashSet::new();
 
     for cap in re.captures_iter(&text.to_lowercase()) {
-        let day = format!("{:0>2}", &cap[1]);
+        let Ok(day_num) = cap[1].parse::<u32>() else {
+            continue;
+        };
+        let day = format!("{:0>2}", day_num);
         let month_name = &cap[2].to_lowercase();
         let year = &cap[3];
         let nr = &cap[4];
 
-        if let Some(month_num) = map_norwegian_month(month_name) {
-            let law_id = format!("LOV-{}-{}-{}-{}", year, month_num, day, nr);
+        if let Some(month_num_str) = map_norwegian_month(month_name) {
+            let Ok(year_num) = year.parse::<u32>() else {
+                continue;
+            };
+            let Ok(month_num) = month_num_str.parse::<u32>() else {
+                continue;
+            };
+
+            // Validate the date
+            if !is_valid_date(year_num, month_num, day_num) {
+                continue;
+            }
+
+            let law_id = format!("LOV-{}-{}-{}-{}", year, month_num_str, day, nr);
             found_ids.insert(law_id);
         }
     }
@@ -469,11 +489,24 @@ fn extract_enforcement_date(text: &str) -> EnforcementParseResult {
             continue;
         }
 
-        let Some(month_num) = map_norwegian_month(&cap[2].to_lowercase()) else {
+        let Some(month_num_str) = map_norwegian_month(&cap[2].to_lowercase()) else {
             continue;
         };
 
-        let iso_date = format!("{}-{}-{:0>2}", &cap[3], month_num, day_num);
+        let Ok(year_num) = cap[3].parse::<u32>() else {
+            continue;
+        };
+
+        let Ok(month_num) = month_num_str.parse::<u32>() else {
+            continue;
+        };
+
+        // Validate the date (e.g., reject "31. februar 2027")
+        if !is_valid_date(year_num, month_num, day_num) {
+            continue;
+        }
+
+        let iso_date = format!("{}-{}-{:0>2}", year_num, month_num_str, day_num);
         return EnforcementParseResult {
             value: iso_date,
             matched_snippet: snippet_around_match(text, full_match.start(), full_match.end()),
@@ -539,6 +572,28 @@ fn snippet_around_match(text: &str, start: usize, end: usize) -> String {
     }
 }
 
+fn is_valid_date(year: u32, month: u32, day: u32) -> bool {
+    if month < 1 || month > 12 {
+        return false;
+    }
+    
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            // Check for leap year
+            if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return false,
+    };
+    
+    day >= 1 && day <= days_in_month
+}
+
 fn map_norwegian_month(month: &str) -> Option<&'static str> {
     match month {
         "januar" => Some("01"),
@@ -598,6 +653,45 @@ mod tests {
         let text = "lov 12. foo 2024 nr. 1";
         let ids = extract_law_ids(text);
         assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn is_valid_date_accepts_valid_dates() {
+        assert!(is_valid_date(2024, 1, 31));  // January 31
+        assert!(is_valid_date(2024, 4, 30));  // April 30
+        assert!(is_valid_date(2024, 2, 29));  // Feb 29 in leap year
+        assert!(is_valid_date(2000, 2, 29));  // Feb 29 in leap year (divisible by 400)
+    }
+
+    #[test]
+    fn is_valid_date_rejects_invalid_dates() {
+        assert!(!is_valid_date(2024, 2, 30)); // Feb 30 doesn't exist
+        assert!(!is_valid_date(2027, 2, 31)); // Feb 31 doesn't exist
+        assert!(!is_valid_date(2023, 2, 29)); // Feb 29 in non-leap year
+        assert!(!is_valid_date(1900, 2, 29)); // Feb 29 in non-leap year (divisible by 100 but not 400)
+        assert!(!is_valid_date(2024, 4, 31)); // April 31 doesn't exist
+        assert!(!is_valid_date(2024, 6, 31)); // June 31 doesn't exist
+        assert!(!is_valid_date(2024, 9, 31)); // September 31 doesn't exist
+        assert!(!is_valid_date(2024, 11, 31)); // November 31 doesn't exist
+        assert!(!is_valid_date(2024, 0, 15));  // Month 0 doesn't exist
+        assert!(!is_valid_date(2024, 13, 15)); // Month 13 doesn't exist
+        assert!(!is_valid_date(2024, 1, 0));   // Day 0 doesn't exist
+        assert!(!is_valid_date(2024, 1, 32));  // Day 32 doesn't exist
+    }
+
+    #[test]
+    fn extract_law_ids_ignores_invalid_dates() {
+        let text = "lov 31. februar 2027 nr. 99";
+        let ids = extract_law_ids(text);
+        assert!(ids.is_empty(), "Should reject invalid date like Feb 31");
+    }
+
+    #[test]
+    fn extract_enforcement_date_rejects_invalid_dates() {
+        let text = "Loven trer i kraft 31. februar 2027";
+        let result = extract_enforcement_date(text);
+        // Should fall through to no match since the invalid date is rejected
+        assert_eq!(result.value, ENFORCEMENT_PARSER_IKKE_FUNNET);
     }
 
     #[test]
