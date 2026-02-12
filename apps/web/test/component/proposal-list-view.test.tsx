@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -96,6 +96,42 @@ describe("ProposalListView", () => {
     )
   })
 
+  it("opens detail page when pressing Enter on focused row", async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(jsonResponse(createPayload()))
+
+    render(<ProposalListView />)
+
+    await screen.findByText("Endringer i skatteloven")
+
+    const rowLink = screen.getByRole("link", {
+      name: "Åpne detalj for Endringer i skatteloven",
+    })
+
+    fireEvent.keyDown(rowLink, { key: "Enter" })
+
+    expect(pushMock).toHaveBeenCalledWith(
+      "/proposal/d4d87de7-e28f-44c9-b6c5-0f899f9a3201"
+    )
+  })
+
+  it("does not hijack Enter key presses from nested source link", async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(jsonResponse(createPayload()))
+
+    render(<ProposalListView />)
+
+    await screen.findByText("Endringer i skatteloven")
+
+    const sourceLink = screen.getByRole("link", { name: "Stortinget" })
+
+    fireEvent.keyDown(sourceLink, { key: "Enter" })
+
+    expect(pushMock).not.toHaveBeenCalledWith(
+      "/proposal/d4d87de7-e28f-44c9-b6c5-0f899f9a3201"
+    )
+  })
+
   it("shows empty-state feedback when no rows are returned", async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(
@@ -166,5 +202,8 @@ describe("ProposalListView", () => {
     })
 
     expect(screen.getByText("Testfeil fra API")).toBeInTheDocument()
+    expect(
+      screen.queryByText("Ingen treff for gjeldende filtre.")
+    ).not.toBeInTheDocument()
   })
 })

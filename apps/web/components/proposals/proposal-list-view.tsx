@@ -72,6 +72,10 @@ function ProposalRow({
   onOpen: () => void
 }) {
   function handleKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>) {
+    if (event.target !== event.currentTarget) {
+      return
+    }
+
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault()
       onOpen()
@@ -379,7 +383,7 @@ export function ProposalListView() {
         </Alert>
       ) : null}
 
-      {isLoading ? (
+      {errorMessage ? null : isLoading ? (
         <LoadingRows />
       ) : payload && payload.items.length > 0 ? (
         <Card className="border-zinc-300/90 bg-white/95 shadow-sm">
