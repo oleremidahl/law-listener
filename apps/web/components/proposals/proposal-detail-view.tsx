@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { ArrowLeftIcon, ExternalLinkIcon, RefreshCcwIcon } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,11 @@ import {
 import { formatEnforcementDate } from "@/lib/enforcement"
 import { formatDate } from "@/lib/query"
 import { cn } from "@/lib/utils"
-import type { ProposalDetailResponse } from "@/lib/types"
+import type {
+  ProposalDetailResponse,
+  ProposalSummaryState,
+  ProposalSummaryTriggerResponse,
+} from "@/lib/types"
 
 import { StatusBadge } from "./status-badge"
 
@@ -34,12 +38,78 @@ function LoadingDetail() {
   )
 }
 
+function formatDateTime(value: string | null): string {
+  if (!value) {
+    return "-"
+  }
+
+  const parsed = new Date(value)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat("nb-NO", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed)
+}
+
+function isRetryEligible(summary: ProposalSummaryState): boolean {
+  if (summary.status === "missing") {
+    return true
+  }
+
+  if (summary.status !== "failed") {
+    return false
+  }
+
+  if (!summary.next_retry_at) {
+    return true
+  }
+
+  const nextRetryAt = new Date(summary.next_retry_at)
+  if (Number.isNaN(nextRetryAt.getTime())) {
+    return true
+  }
+
+  return Date.now() >= nextRetryAt.getTime()
+}
+
+function SummaryList({
+  items,
+  emptyLabel,
+}: {
+  items: string[]
+  emptyLabel: string
+}) {
+  if (items.length === 0) {
+    return <p className="text-sm text-zinc-600">{emptyLabel}</p>
+  }
+
+  return (
+    <ul className="list-disc space-y-1 pl-5 text-sm text-zinc-800">
+      {items.map((entry, index) => (
+        <li key={`${entry}-${index}`}>{entry}</li>
+      ))}
+    </ul>
+  )
+}
+
 export function ProposalDetailView({ proposalId }: { proposalId: string }) {
   const [payload, setPayload] = useState<ProposalDetailResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isNotFound, setIsNotFound] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
+  const triggerSentRef = useRef(false)
+
+  useEffect(() => {
+    triggerSentRef.current = false
+  }, [proposalId])
 
   useEffect(() => {
     let ignore = false
@@ -95,6 +165,59 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
     }
   }, [proposalId, refreshTick])
 
+  useEffect(() => {
+    if (!payload || triggerSentRef.current || !isRetryEligible(payload.summary)) {
+      return
+    }
+
+    triggerSentRef.current = true
+
+    let ignore = false
+
+    async function triggerSummary() {
+      try {
+        const response = await fetch(`/api/proposals/${proposalId}/summary`, {
+          method: "POST",
+          cache: "no-store",
+        })
+
+        if (!response.ok) {
+          return
+        }
+
+        const body = (await response.json().catch(() => null)) as
+          | ProposalSummaryTriggerResponse
+          | null
+
+        if (ignore || !body) {
+          return
+        }
+
+        setRefreshTick((value) => value + 1)
+      } catch {
+        // Fail-open in UI; detail still remains usable without summary.
+      }
+    }
+
+    void triggerSummary()
+
+    return () => {
+      ignore = true
+    }
+  }, [payload, proposalId])
+
+  useEffect(() => {
+    if (payload?.summary.status !== "pending") {
+      return
+    }
+
+    const timer = setInterval(() => {
+      setRefreshTick((value) => value + 1)
+    }, 4000)
+
+    return () => clearInterval(timer)
+  }, [payload?.summary.status])
+
   if (isLoading) {
     return <LoadingDetail />
   }
@@ -123,7 +246,7 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
     return null
   }
 
-  const { proposal, linkedDocuments } = payload
+  const { proposal, linkedDocuments, summary } = payload
 
   return (
     <section className="space-y-6">
@@ -191,6 +314,69 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
               </Button>
             ) : null}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-zinc-300/90 bg-white/95 shadow-sm">
+        <CardHeader>
+          <CardTitle className="font-serif text-2xl text-zinc-900">
+            AI-oppsummering
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {summary.status === "ready" && summary.data ? (
+            <>
+              <p className="text-sm leading-relaxed text-zinc-800">
+                {summary.data.short_summary}
+              </p>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-zinc-900">Hva endres</h3>
+                <SummaryList
+                  items={summary.data.law_changes}
+                  emptyLabel="Ingen konkrete lovendringer identifisert."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-zinc-900">Hvem berøres</h3>
+                <SummaryList
+                  items={summary.data.affected_groups}
+                  emptyLabel="Ingen grupper spesifisert."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-zinc-900">Forbehold</h3>
+                <SummaryList items={summary.data.caveats} emptyLabel="Ingen forbehold oppgitt." />
+              </div>
+
+              <p className="text-xs text-zinc-500">
+                Generert: {formatDateTime(summary.generated_at)}. Kilde: {" "}
+                {summary.data.sources.proposal_url || "ukjent"} ({summary.data.sources.fetch_method}
+                )
+              </p>
+            </>
+          ) : null}
+
+          {summary.status === "missing" || summary.status === "pending" ? (
+            <p className="text-sm text-zinc-600">
+              Oppsummering genereres automatisk. Denne seksjonen oppdateres når den er klar.
+            </p>
+          ) : null}
+
+          {summary.status === "failed" ? (
+            <div className="space-y-1">
+              <p className="text-sm text-zinc-700">
+                Oppsummering er midlertidig utilgjengelig. Systemet prøver automatisk igjen.
+              </p>
+              {summary.next_retry_at ? (
+                <p className="text-xs text-zinc-500">
+                  Neste automatiske forsøk etter: {formatDateTime(summary.next_retry_at)}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

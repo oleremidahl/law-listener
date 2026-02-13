@@ -28,6 +28,21 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
             document_type: "lov",
           },
         ],
+        summary: {
+          status: "ready",
+          data: {
+            short_summary: "Forslaget moderniserer skattereglene.",
+            law_changes: ["Oppdaterer hjemmel for digital rapportering."],
+            affected_groups: ["Bedrifter med rapporteringsplikt."],
+            caveats: ["Detaljer avhenger av forskrifter."],
+            sources: {
+              proposal_url: "https://stortinget.no/vedtak/1",
+              fetch_method: "jina",
+            },
+          },
+          generated_at: "2026-02-10T10:00:00.000Z",
+          next_retry_at: null,
+        },
       }),
     })
   })

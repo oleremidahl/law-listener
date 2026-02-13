@@ -34,6 +34,26 @@ export interface ProposalDetail {
   lovdata_link: string | null
 }
 
+export interface ProposalSummaryPayload {
+  short_summary: string
+  law_changes: string[]
+  affected_groups: string[]
+  caveats: string[]
+  sources: {
+    proposal_url: string
+    fetch_method: string
+  }
+}
+
+export type ProposalSummaryStatus = "missing" | "pending" | "ready" | "failed"
+
+export interface ProposalSummaryState {
+  status: ProposalSummaryStatus
+  data: ProposalSummaryPayload | null
+  generated_at: string | null
+  next_retry_at: string | null
+}
+
 export interface LinkedDocument {
   id: string
   dokid: string
@@ -58,8 +78,23 @@ export interface ProposalListResponse {
 export interface ProposalDetailResponse {
   proposal: ProposalDetail
   linkedDocuments: LinkedDocument[]
+  summary: ProposalSummaryState
 }
 
 export interface ApiError {
   error: string
+}
+
+export type ProposalSummaryTriggerStatus =
+  | "started"
+  | "pending"
+  | "already_ready"
+  | "cooldown"
+  | "failed"
+
+export interface ProposalSummaryTriggerResponse {
+  status: ProposalSummaryTriggerStatus
+  request_id?: string
+  proposal_id?: string
+  summary_id?: string
 }

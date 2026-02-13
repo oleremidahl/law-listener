@@ -7,6 +7,8 @@ import type {
   ProposalDetailResponse,
   ProposalListItem,
   ProposalListResponse,
+  ProposalSummaryPayload,
+  ProposalSummaryState,
 } from "@/lib/types"
 
 function createListError(message: string, details: unknown): Error {
@@ -119,6 +121,77 @@ function isNotFoundError(error: { code?: string } | null): boolean {
   return Boolean(error?.code && ["PGRST116", "PGRST205"].includes(error.code))
 }
 
+type SummaryGenerationStatus = "pending" | "ready" | "failed"
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+}
+
+function isSummaryPayload(value: unknown): value is ProposalSummaryPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const candidate = value as Record<string, unknown>
+  const sources = candidate.sources
+
+  if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
+    return false
+  }
+
+  const sourceRecord = sources as Record<string, unknown>
+
+  return (
+    typeof candidate.short_summary === "string" &&
+    isStringArray(candidate.law_changes) &&
+    isStringArray(candidate.affected_groups) &&
+    isStringArray(candidate.caveats) &&
+    typeof sourceRecord.proposal_url === "string" &&
+    typeof sourceRecord.fetch_method === "string"
+  )
+}
+
+function mapSummaryState(row: {
+  generation_status: SummaryGenerationStatus
+  summary_payload: unknown
+  generated_at: string | null
+  next_retry_at: string | null
+} | null): ProposalSummaryState {
+  if (!row) {
+    return {
+      status: "missing",
+      data: null,
+      generated_at: null,
+      next_retry_at: null,
+    }
+  }
+
+  if (row.generation_status === "pending") {
+    return {
+      status: "pending",
+      data: null,
+      generated_at: row.generated_at,
+      next_retry_at: row.next_retry_at,
+    }
+  }
+
+  if (row.generation_status === "ready" && isSummaryPayload(row.summary_payload)) {
+    return {
+      status: "ready",
+      data: row.summary_payload,
+      generated_at: row.generated_at,
+      next_retry_at: row.next_retry_at,
+    }
+  }
+
+  return {
+    status: "failed",
+    data: null,
+    generated_at: row.generated_at,
+    next_retry_at: row.next_retry_at,
+  }
+}
+
 export async function getProposalDetail(
   proposalId: string
 ): Promise<ProposalDetailResponse | null> {
@@ -172,8 +245,20 @@ export async function getProposalDetail(
       .filter((document): document is LinkedDocument => Boolean(document))
   }
 
+  const { data: summaryRow, error: summaryError } = await supabase
+    .from("proposal_summaries")
+    .select("generation_status,summary_payload,generated_at,next_retry_at")
+    .eq("proposal_id", proposalId)
+    .eq("proposal_status", proposal.status)
+    .maybeSingle()
+
+  if (summaryError && !isNotFoundError(summaryError)) {
+    throw createListError("Could not fetch proposal summary", summaryError)
+  }
+
   return {
     proposal: proposal as ProposalDetail,
     linkedDocuments,
+    summary: mapSummaryState(summaryRow),
   }
 }

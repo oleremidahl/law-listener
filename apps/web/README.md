@@ -16,6 +16,8 @@ Create `apps/web/.env.local` with:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sb_publishable_key>
+SUMMARY_EDGE_FUNCTION_URL=https://<project-ref>.supabase.co/functions/v1/generate-proposal-summary
+SUMMARY_TRIGGER_SECRET=<same secret configured in edge function>
 ```
 
 Backward compatibility: `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still accepted if `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` is not set.
@@ -37,3 +39,4 @@ pnpm test:e2e:smoke
 - `/proposal/[id]`: proposal detail with linked documents.
 - `/api/proposals`: read-only list API used by the UI.
 - `/api/proposals/[id]`: read-only detail API used by the UI.
+- `/api/proposals/[id]/summary`: server-side trigger endpoint for summary generation.
