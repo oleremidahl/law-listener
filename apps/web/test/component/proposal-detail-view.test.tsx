@@ -18,7 +18,7 @@ function createPayload(): ProposalDetailResponse {
       title: "Endringer i skatteloven",
       status: "vedtatt",
       decision_date: "2026-02-01",
-      enforcement_date: null,
+      enforcement_date: "KONGEN_BESTEMMER",
       feed_description: "Forslaget gjelder modernisering av skattereglene.",
       stortinget_link: "https://stortinget.no/vedtak/1",
       lovdata_link: null,
@@ -51,6 +51,9 @@ describe("ProposalDetailView", () => {
     expect(await screen.findByText("Endringer i skatteloven")).toBeInTheDocument()
     expect(screen.getByText("Skatteforvaltningsloven")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Åpne på Stortinget" })).toBeInTheDocument()
+    expect(
+      screen.getByText(/Kongen fastsetter dato under kongelig resolusjon\./)
+    ).toBeInTheDocument()
   })
 
   it("shows not-found feedback when the proposal API returns 404", async () => {

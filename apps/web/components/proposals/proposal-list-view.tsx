@@ -34,6 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { formatEnforcementDate } from "@/lib/enforcement"
 import { cn } from "@/lib/utils"
 import { getVisiblePages } from "@/lib/pagination"
 import { formatDate, parseListQuery, toSearchParams, withPage } from "@/lib/query"
@@ -101,6 +102,9 @@ function ProposalRow({
         <StatusBadge status={item.status} />
       </TableCell>
       <TableCell className="text-zinc-700">{formatDate(item.decision_date)}</TableCell>
+      <TableCell className="max-w-[24rem] text-zinc-700">
+        <p className="line-clamp-2">{formatEnforcementDate(item.enforcement_date)}</p>
+      </TableCell>
       <TableCell className="text-right">
         {item.stortinget_link ? (
           <a
@@ -395,6 +399,7 @@ export function ProposalListView() {
                   <TableHead>Beskrivelse</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Beslutningsdato</TableHead>
+                  <TableHead>Ikrafttredelse</TableHead>
                   <TableHead className="text-right">Kilde</TableHead>
                 </TableRow>
               </TableHeader>

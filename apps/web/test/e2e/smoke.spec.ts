@@ -13,7 +13,7 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
           title: "Endringer i skatteloven",
           status: "vedtatt",
           decision_date: "2026-02-01",
-          enforcement_date: null,
+          enforcement_date: "KONGEN_BESTEMMER",
           feed_description: "Forslaget gjelder modernisering av skattereglene.",
           stortinget_link: "https://stortinget.no/vedtak/1",
           lovdata_link: null,
@@ -45,6 +45,7 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
               feed_description: "Forslaget gjelder modernisering av skattereglene.",
               status: "vedtatt",
               decision_date: "2026-02-01",
+              enforcement_date: "STRAKS",
               stortinget_link: "https://stortinget.no/vedtak/1",
               lovdata_link: null,
             },
@@ -56,6 +57,7 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
               feed_description: "Forslaget gjelder modernisering av skattereglene.",
               status: "vedtatt",
               decision_date: "2026-02-01",
+              enforcement_date: "STRAKS",
               stortinget_link: "https://stortinget.no/vedtak/1",
               lovdata_link: null,
             },
@@ -89,6 +91,9 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
   ).toBeVisible()
 
   await expect(page.getByText("Endringer i skatteloven")).toBeVisible()
+  await expect(
+    page.getByText("Trer i kraft så snart kongen har sanksjonert forslaget.")
+  ).toBeVisible()
 
   await page.getByLabel("Søk i beskrivelse").fill("modernisering")
   await page.getByRole("button", { name: "Filtrer" }).click()
@@ -101,4 +106,7 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
   await expect(page.getByText("Koblede lover")).toBeVisible()
   await expect(page.getByText("LOV-2017-06-16-60")).toBeVisible()
   await expect(page.getByRole("link", { name: "Åpne på Stortinget" })).toBeVisible()
+  await expect(
+    page.getByText("Kongen fastsetter dato under kongelig resolusjon.")
+  ).toBeVisible()
 })

@@ -31,6 +31,7 @@ function createPayload(overrides?: Partial<ProposalListResponse>): ProposalListR
         feed_description: "Forslaget gjelder modernisering av skattereglene.",
         status: "vedtatt",
         decision_date: "2026-02-01",
+        enforcement_date: "STRAKS",
         stortinget_link: "https://stortinget.no/vedtak/1",
         lovdata_link: null,
       },
@@ -60,6 +61,9 @@ describe("ProposalListView", () => {
 
     expect(await screen.findByText("Endringer i skatteloven")).toBeInTheDocument()
     expect(screen.getAllByText("Vedtatt").length).toBeGreaterThan(0)
+    expect(
+      screen.getByText("Trer i kraft så snart kongen har sanksjonert forslaget.")
+    ).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith("/api/proposals", { cache: "no-store" })
   })
 

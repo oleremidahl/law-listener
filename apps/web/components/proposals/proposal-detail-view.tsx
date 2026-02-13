@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { formatEnforcementDate } from "@/lib/enforcement"
 import { formatDate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import type { ProposalDetailResponse } from "@/lib/types"
@@ -153,6 +154,9 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
             <StatusBadge status={proposal.status} />
             <span className="text-sm text-zinc-600">
               Beslutningsdato: {formatDate(proposal.decision_date)}
+            </span>
+            <span className="text-sm text-zinc-600">
+              Ikrafttredelse: {formatEnforcementDate(proposal.enforcement_date)}
             </span>
           </div>
         </CardHeader>
