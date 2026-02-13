@@ -1,0 +1,58 @@
+name: Workers CI
+
+on:
+  pull_request:
+    paths:
+      - "workers/**"
+      - ".github/workflows/workers-ci.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "workers/**"
+      - ".github/workflows/workers-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            workers/stortinget-rss-worker/target/
+            workers/stortinget-law-matcher/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Test stortinget-rss-worker
+        working-directory: workers/stortinget-rss-worker
+        run: cargo test --lib
+
+      - name: Test stortinget-law-matcher
+        working-directory: workers/stortinget-law-matcher
+        run: cargo test --lib
+
+      - name: Build stortinget-rss-worker
+        working-directory: workers/stortinget-rss-worker
+        run: |
+          cargo install -q worker-build@^0.7 || true
+          worker-build --release
+
+      - name: Build stortinget-law-matcher
+        working-directory: workers/stortinget-law-matcher
+        run: |
+          cargo install -q worker-build@^0.7 || true
+          worker-build --release

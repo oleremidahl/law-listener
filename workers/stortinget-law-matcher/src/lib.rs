@@ -850,4 +850,296 @@ mod tests {
         assert_eq!(attempts.get(), 1);
         assert_eq!(parsed.value, ENFORCEMENT_PARSER_IKKE_FUNNET);
     }
+
+    // Tests for HTML extraction
+    mod html_extraction {
+        use super::*;
+
+        #[test]
+        fn extract_between_comments_handles_missing_start_marker() {
+            let html = "no start marker hello<!-- /INNHOLD --> after";
+            assert_eq!(
+                extract_between_comments(html, "<!-- INNHOLD -->", "<!-- /INNHOLD -->"),
+                None
+            );
+        }
+
+        #[test]
+        fn extract_between_comments_handles_missing_end_marker() {
+            let html = "before <!-- INNHOLD -->hello no end marker";
+            assert_eq!(
+                extract_between_comments(html, "<!-- INNHOLD -->", "<!-- /INNHOLD -->"),
+                None
+            );
+        }
+
+        #[test]
+        fn extract_between_comments_handles_reversed_markers() {
+            let html = "before <!-- /INNHOLD -->hello<!-- INNHOLD --> after";
+            // Should return None because end comes before start
+            assert_eq!(
+                extract_between_comments(html, "<!-- INNHOLD -->", "<!-- /INNHOLD -->"),
+                None
+            );
+        }
+
+        #[test]
+        fn strip_html_tags_handles_nested_tags() {
+            let html = "<div><p><span>nested</span> text</p></div>";
+            let text = strip_html_tags(html);
+            assert_eq!(text, "nested text");
+        }
+
+        #[test]
+        fn strip_html_tags_preserves_text_with_no_tags() {
+            let html = "plain text without tags";
+            let text = strip_html_tags(html);
+            assert_eq!(text, "plain text without tags");
+        }
+
+        #[test]
+        fn strip_html_tags_handles_multiple_nbsp() {
+            let html = "one&nbsp;two&nbsp;&nbsp;three";
+            let text = strip_html_tags(html);
+            assert_eq!(text, "one two three");
+        }
+    }
+
+    // Tests for law ID extraction edge cases
+    mod law_id_extraction {
+        use super::*;
+
+        #[test]
+        fn extract_law_ids_handles_multiple_different_laws() {
+            let text = "lov 16. juni 2017 nr. 60 og lov 21. desember 2005 nr. 123";
+            let mut ids = extract_law_ids(text);
+            ids.sort();
+
+            assert_eq!(ids.len(), 2);
+            assert!(ids.contains(&"LOV-2017-06-16-60".to_string()));
+            assert!(ids.contains(&"LOV-2005-12-21-123".to_string()));
+        }
+
+        #[test]
+        fn extract_law_ids_handles_case_insensitivity() {
+            let text = "LOV 16. JUNI 2017 NR. 60";
+            let ids = extract_law_ids(text);
+
+            assert_eq!(ids.len(), 1);
+            assert!(ids.contains(&"LOV-2017-06-16-60".to_string()));
+        }
+
+        #[test]
+        fn extract_law_ids_handles_varying_spacing() {
+            let text = "lov  16.   juni    2017   nr.   60";
+            let ids = extract_law_ids(text);
+
+            assert_eq!(ids.len(), 1);
+            assert!(ids.contains(&"LOV-2017-06-16-60".to_string()));
+        }
+
+        #[test]
+        fn extract_law_ids_handles_single_digit_days() {
+            let text = "lov 5. mai 2020 nr. 42";
+            let ids = extract_law_ids(text);
+
+            assert_eq!(ids.len(), 1);
+            assert!(ids.contains(&"LOV-2020-05-05-42".to_string()));
+        }
+
+        #[test]
+        fn extract_law_ids_handles_no_matches() {
+            let text = "Dette er en tekst uten lovhenvisninger";
+            let ids = extract_law_ids(text);
+            assert_eq!(ids.len(), 0);
+        }
+    }
+
+    // Tests for enforcement date extraction edge cases
+    mod enforcement_extraction {
+        use super::*;
+
+        #[test]
+        fn extract_enforcement_date_handles_single_digit_day() {
+            let text = "Loven trer i kraft 1. januar 2027";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, "2027-01-01");
+            assert_eq!(result.source, "fixed_date");
+        }
+
+        #[test]
+        fn extract_enforcement_date_handles_case_insensitivity() {
+            let text = "Loven TRER I KRAFT STRAKS";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_STRAKS);
+        }
+
+        #[test]
+        fn extract_enforcement_date_multi_signal_with_section() {
+            let text = "Loven trer i kraft. § 5 gjelder fra en annen dato.";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_FLERE_DATOER);
+            assert_eq!(result.source, "multi");
+        }
+
+        #[test]
+        fn extract_enforcement_date_multi_signal_with_ulike_tider() {
+            let text = "Loven trer i kraft til ulike tider";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_FLERE_DATOER);
+            assert_eq!(result.source, "multi");
+        }
+
+        #[test]
+        fn extract_enforcement_date_handles_fra_den_tid_kongen() {
+            let text = "Loven trer i kraft fra den tid Kongen bestemmer";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_KONGEN_BESTEMMER);
+            assert_eq!(result.source, "kongen");
+        }
+
+        #[test]
+        fn extract_enforcement_date_no_trer_i_kraft() {
+            let text = "Dette er en lovtekst uten noen ikrafttredelsesklausul";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_PARSER_IKKE_FUNNET);
+            assert_eq!(result.source, "none");
+        }
+
+        #[test]
+        fn snippet_around_match_handles_start_of_text() {
+            let text = "trer i kraft straks og videre tekst";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_STRAKS);
+            assert!(result.matched_snippet.contains("trer i kraft straks"));
+        }
+
+        #[test]
+        fn snippet_around_match_handles_end_of_text() {
+            let text = "lang tekst før slutten trer i kraft straks";
+            let result = extract_enforcement_date(text);
+
+            assert_eq!(result.value, ENFORCEMENT_STRAKS);
+            assert!(result.matched_snippet.contains("trer i kraft straks"));
+        }
+    }
+
+    // Tests for retry logic
+    mod retry_logic {
+        use super::*;
+
+        #[test]
+        fn retry_succeeds_on_first_attempt() {
+            let attempts = Cell::new(0);
+
+            let result: std::result::Result<String, &str> = run_retry_simulation(
+                &RETRY_DELAYS_MS,
+                |_| {
+                    attempts.set(attempts.get() + 1);
+                    Ok("success".to_string())
+                },
+            );
+
+            assert!(result.is_ok());
+            assert_eq!(attempts.get(), 1);
+        }
+
+        #[test]
+        fn retry_succeeds_on_second_attempt() {
+            let attempts = Cell::new(0);
+
+            let result: std::result::Result<String, &str> = run_retry_simulation(
+                &RETRY_DELAYS_MS,
+                |attempt_idx| {
+                    attempts.set(attempts.get() + 1);
+                    if attempt_idx == 0 {
+                        Err("first attempt failed")
+                    } else {
+                        Ok("success on retry".to_string())
+                    }
+                },
+            );
+
+            assert!(result.is_ok());
+            assert_eq!(attempts.get(), 2);
+        }
+
+        #[test]
+        fn retry_succeeds_on_third_attempt() {
+            let attempts = Cell::new(0);
+
+            let result: std::result::Result<String, &str> = run_retry_simulation(
+                &RETRY_DELAYS_MS,
+                |attempt_idx| {
+                    attempts.set(attempts.get() + 1);
+                    if attempt_idx < 2 {
+                        Err("early attempts failed")
+                    } else {
+                        Ok("success on final retry".to_string())
+                    }
+                },
+            );
+
+            assert!(result.is_ok());
+            assert_eq!(attempts.get(), 3);
+        }
+    }
+
+    // Tests for helper functions
+    mod helper_functions {
+        use super::*;
+
+        #[test]
+        fn truncate_chars_handles_short_text() {
+            let text = "short";
+            assert_eq!(truncate_chars(text, 100), "short");
+        }
+
+        #[test]
+        fn truncate_chars_truncates_long_text() {
+            let text = "a".repeat(300);
+            let truncated = truncate_chars(&text, 100);
+            assert!(truncated.chars().count() <= 103); // 100 chars + "..."
+            assert!(truncated.ends_with("..."));
+        }
+
+        #[test]
+        fn truncate_chars_handles_exact_length() {
+            let text = "a".repeat(100);
+            let truncated = truncate_chars(&text, 100);
+            assert_eq!(truncated.chars().count(), 100);
+            assert!(!truncated.ends_with("..."));
+        }
+
+        #[test]
+        fn clamp_to_char_boundary_start_handles_valid_index() {
+            let text = "hello world";
+            assert_eq!(clamp_to_char_boundary_start(text, 5), 5);
+        }
+
+        #[test]
+        fn clamp_to_char_boundary_start_handles_overflow() {
+            let text = "hello";
+            assert_eq!(clamp_to_char_boundary_start(text, 100), 5);
+        }
+
+        #[test]
+        fn clamp_to_char_boundary_end_handles_valid_index() {
+            let text = "hello world";
+            assert_eq!(clamp_to_char_boundary_end(text, 5), 5);
+        }
+
+        #[test]
+        fn clamp_to_char_boundary_end_handles_overflow() {
+            let text = "hello";
+            assert_eq!(clamp_to_char_boundary_end(text, 100), 5);
+        }
+    }
 }
