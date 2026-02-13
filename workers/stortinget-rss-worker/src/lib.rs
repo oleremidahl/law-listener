@@ -452,9 +452,9 @@ mod tests {
               </channel>
         "#;
 
+        // The parser returns an error for malformed/unclosed XML
         let result = parse_rss_items(xml);
-        // The parser may return an error for malformed XML
-        assert!(result.is_ok() || result.is_err());
+        assert!(result.is_err(), "Parser should return error for malformed XML");
     }
 
     #[test]
