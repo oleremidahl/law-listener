@@ -79,26 +79,6 @@ function isRetryEligible(summary: ProposalSummaryState): boolean {
   return Date.now() >= nextRetryAt.getTime()
 }
 
-function SummaryList({
-  items,
-  emptyLabel,
-}: {
-  items: string[]
-  emptyLabel: string
-}) {
-  if (items.length === 0) {
-    return <p className="text-sm text-zinc-600">{emptyLabel}</p>
-  }
-
-  return (
-    <ul className="list-disc space-y-1 pl-5 text-sm text-zinc-800">
-      {items.map((entry, index) => (
-        <li key={`${entry}-${index}`}>{entry}</li>
-      ))}
-    </ul>
-  )
-}
-
 export function ProposalDetailView({ proposalId }: { proposalId: string }) {
   const [payload, setPayload] = useState<ProposalDetailResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -326,35 +306,12 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
         <CardContent className="space-y-4">
           {summary.status === "ready" && summary.data ? (
             <>
-              <p className="text-sm leading-relaxed text-zinc-800">
-                {summary.data.short_summary}
+              <p className="text-sm leading-relaxed whitespace-pre-line text-zinc-800">
+                {summary.data}
               </p>
 
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-zinc-900">Hva endres</h3>
-                <SummaryList
-                  items={summary.data.law_changes}
-                  emptyLabel="Ingen konkrete lovendringer identifisert."
-                />
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-zinc-900">Hvem berøres</h3>
-                <SummaryList
-                  items={summary.data.affected_groups}
-                  emptyLabel="Ingen grupper spesifisert."
-                />
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-zinc-900">Forbehold</h3>
-                <SummaryList items={summary.data.caveats} emptyLabel="Ingen forbehold oppgitt." />
-              </div>
-
               <p className="text-xs text-zinc-500">
-                Generert: {formatDateTime(summary.generated_at)}. Kilde: {" "}
-                {summary.data.sources.proposal_url || "ukjent"} ({summary.data.sources.fetch_method}
-                )
+                Generert: {formatDateTime(summary.generated_at)}
               </p>
             </>
           ) : null}

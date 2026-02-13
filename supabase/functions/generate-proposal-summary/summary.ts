@@ -1,14 +1,3 @@
-export interface ProposalSummaryPayload {
-  short_summary: string;
-  law_changes: string[];
-  affected_groups: string[];
-  caveats: string[];
-  sources: {
-    proposal_url: string;
-    fetch_method: string;
-  };
-}
-
 export function extractBetweenComments(
   html: string,
   startMarker: string,
@@ -66,35 +55,6 @@ export function truncateForPrompt(value: string, maxChars: number): string {
   }
 
   return `${value.slice(0, maxChars)}...`;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) &&
-    value.every((entry) => typeof entry === "string");
-}
-
-export function isProposalSummaryPayload(
-  value: unknown,
-): value is ProposalSummaryPayload {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const sources = candidate.sources;
-
-  if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
-    return false;
-  }
-
-  const sourceRecord = sources as Record<string, unknown>;
-
-  return typeof candidate.short_summary === "string" &&
-    isStringArray(candidate.law_changes) &&
-    isStringArray(candidate.affected_groups) &&
-    isStringArray(candidate.caveats) &&
-    typeof sourceRecord.proposal_url === "string" &&
-    typeof sourceRecord.fetch_method === "string";
 }
 
 export function extractOpenAiOutputText(payload: unknown): string | null {

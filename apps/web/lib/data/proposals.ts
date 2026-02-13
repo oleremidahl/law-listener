@@ -123,32 +123,27 @@ function isNotFoundError(error: { code?: string } | null): boolean {
 
 type SummaryGenerationStatus = "pending" | "ready" | "failed"
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
-}
+function extractSummaryPayload(value: unknown): ProposalSummaryPayload | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim()
+  }
 
-function isSummaryPayload(value: unknown): value is ProposalSummaryPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false
+    return null
   }
 
-  const candidate = value as Record<string, unknown>
-  const sources = candidate.sources
+  // Backward compatibility for older rows written as object payloads.
+  const record = value as Record<string, unknown>
 
-  if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
-    return false
+  if (typeof record.summary_text === "string" && record.summary_text.trim().length > 0) {
+    return record.summary_text.trim()
   }
 
-  const sourceRecord = sources as Record<string, unknown>
+  if (typeof record.short_summary === "string" && record.short_summary.trim().length > 0) {
+    return record.short_summary.trim()
+  }
 
-  return (
-    typeof candidate.short_summary === "string" &&
-    isStringArray(candidate.law_changes) &&
-    isStringArray(candidate.affected_groups) &&
-    isStringArray(candidate.caveats) &&
-    typeof sourceRecord.proposal_url === "string" &&
-    typeof sourceRecord.fetch_method === "string"
-  )
+  return null
 }
 
 function mapSummaryState(row: {
@@ -175,10 +170,12 @@ function mapSummaryState(row: {
     }
   }
 
-  if (row.generation_status === "ready" && isSummaryPayload(row.summary_payload)) {
+  const summaryPayload = extractSummaryPayload(row.summary_payload)
+
+  if (row.generation_status === "ready" && summaryPayload) {
     return {
       status: "ready",
-      data: row.summary_payload,
+      data: summaryPayload,
       generated_at: row.generated_at,
       next_retry_at: row.next_retry_at,
     }

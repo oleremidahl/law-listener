@@ -34,16 +34,7 @@ export interface ProposalDetail {
   lovdata_link: string | null
 }
 
-export interface ProposalSummaryPayload {
-  short_summary: string
-  law_changes: string[]
-  affected_groups: string[]
-  caveats: string[]
-  sources: {
-    proposal_url: string
-    fetch_method: string
-  }
-}
+export type ProposalSummaryPayload = string
 
 export type ProposalSummaryStatus = "missing" | "pending" | "ready" | "failed"
 

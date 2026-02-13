@@ -8,13 +8,7 @@ import {
   Logger,
   withTimeout,
 } from "../shared/logger.ts";
-import {
-  extractInnholdSection,
-  extractOpenAiOutputText,
-  isProposalSummaryPayload,
-  type ProposalSummaryPayload,
-  truncateForPrompt,
-} from "./summary.ts";
+import { extractOpenAiOutputText, truncateForPrompt } from "./summary.ts";
 
 const FUNCTION_NAME = "generate-proposal-summary";
 const OPENAI_MODEL_ID = "gpt-4.1-mini";
@@ -44,15 +38,6 @@ type ProposalRecord = {
   lovdata_link: string | null;
 };
 
-type LinkedDocument = {
-  id: string;
-  title: string;
-  short_title: string | null;
-  dokid: string;
-  legacy_id: string | null;
-  document_type: string;
-};
-
 type ClaimDecision =
   | "claimed"
   | "already_ready"
@@ -66,7 +51,7 @@ type ClaimResponseRow = {
 
 type SourceResult = {
   text: string;
-  method: "jina" | "direct_scrape";
+  method: "jina";
   sourceUrl: string;
 };
 
@@ -263,32 +248,14 @@ function mapClaimDecision(decision: ClaimDecision): TriggerStatus {
   return "cooldown";
 }
 
-function formatLinkedDocuments(linkedDocuments: LinkedDocument[]): string {
-  if (linkedDocuments.length === 0) {
-    return "Ingen koblede lover funnet.";
-  }
-
-  return linkedDocuments
-    .map((document, index) => {
-      const label = document.short_title ?? document.title;
-      return `${index + 1}. ${label} (dokid: ${document.dokid}, legacy: ${
-        document.legacy_id ?? "mangler"
-      }, type: ${document.document_type})`;
-    })
-    .join("\n");
-}
-
 function createPrompt(
   proposal: ProposalRecord,
-  linkedDocuments: LinkedDocument[],
   sourceText: string,
-  sourceMethod: SourceResult["method"],
 ): { system: string; user: string } {
   const system = [
-    "Du er en juridisk analyseassistent for norske lovforslag.",
-    "Svar kun med gyldig JSON som matcher schemaet.",
-    "Skriv kort, presist og nøkternt på norsk.",
-    "Ikke dikt opp fakta. Hvis usikkerhet finnes, legg den i caveats.",
+    "Du oppsummerer norske lovforslag kort og nøkternt på norsk.",
+    "Skriv kun vanlig tekst. Ikke bruk JSON, markdown-tabeller eller spesialformat.",
+    "Hold deg til det som kan underbygges av kildeteksten.",
   ].join(" ");
 
   const user = [
@@ -297,69 +264,16 @@ function createPrompt(
     `Beslutningsdato: ${proposal.decision_date ?? "ukjent"}`,
     `Ikrafttredelse: ${proposal.enforcement_date ?? "ukjent"}`,
     `Stortinget-lenke: ${proposal.stortinget_link ?? "ukjent"}`,
-    `Lovdata-lenke: ${proposal.lovdata_link ?? "ukjent"}`,
     "",
-    "Koblede lover:",
-    formatLinkedDocuments(linkedDocuments),
+    "Oppgave:",
+    "Lag en kort og oversiktlig oppsummering av hva forslaget innebærer og hvem som kan bli berørt.",
+    "Nevn usikkerhet hvis teksten er uklar.",
     "",
-    `Kildetekst fra forslagssiden (metode=${sourceMethod}):`,
+    "Kildetekst:",
     truncateForPrompt(sourceText, MAX_SOURCE_TEXT_CHARS),
-    "",
-    "Produser JSON med: short_summary, law_changes, affected_groups, caveats, sources.",
-    "Hvert array-felt skal ha 1-5 konkrete punkter.",
-    "sources.proposal_url skal være stortinget-lenken, og sources.fetch_method skal beskrive hentemetoden.",
   ].join("\n");
 
   return { system, user };
-}
-
-async function fetchLinkedDocuments(
-  supabase: ReturnType<typeof createClient>,
-  proposalId: string,
-): Promise<LinkedDocument[]> {
-  const targetResult = await withTimeout(
-    supabase
-      .from("proposal_targets")
-      .select("document_id")
-      .eq("proposal_id", proposalId),
-    SUPABASE_TIMEOUT_MS,
-  );
-
-  const targetError = (targetResult as { error?: unknown }).error;
-  if (targetError) {
-    throw makeClassifiedError(classifySupabaseError(targetError));
-  }
-
-  const targetRows =
-    (targetResult as { data?: Array<{ document_id?: string | null }> }).data ??
-      [];
-  const documentIds = targetRows
-    .map((item) => item.document_id)
-    .filter((id): id is string => Boolean(id));
-
-  if (documentIds.length === 0) {
-    return [];
-  }
-
-  const docsResult = await withTimeout(
-    supabase
-      .from("legal_documents")
-      .select("id,title,short_title,dokid,legacy_id,document_type")
-      .in("id", documentIds),
-    SUPABASE_TIMEOUT_MS,
-  );
-
-  const docsError = (docsResult as { error?: unknown }).error;
-  if (docsError) {
-    throw makeClassifiedError(classifySupabaseError(docsError));
-  }
-
-  const docs = (docsResult as { data?: LinkedDocument[] }).data ?? [];
-  const byId = new Map(docs.map((item) => [item.id, item]));
-
-  return documentIds
-    .map((id) => byId.get(id))
-    .filter((entry): entry is LinkedDocument => Boolean(entry));
 }
 
 async function fetchViaJina(targetUrl: string): Promise<SourceResult> {
@@ -409,55 +323,8 @@ async function fetchViaJina(targetUrl: string): Promise<SourceResult> {
   };
 }
 
-async function fetchViaDirectScrape(targetUrl: string): Promise<SourceResult> {
-  const response = await withTimeout(
-    fetch(targetUrl, {
-      method: "GET",
-      headers: {
-        "User-Agent": "law-listener/1.0",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    }),
-    SOURCE_FETCH_TIMEOUT_MS,
-  );
-
-  if (!response.ok) {
-    throw makeClassifiedError(
-      {
-        code: `stortinget_http_${response.status}`,
-        messageSafe: "Source page fetch failed",
-        retryable: true,
-        classification: "infrastructure_error",
-      },
-      `Source page fetch failed with status ${response.status}`,
-    );
-  }
-
-  const html = await response.text();
-  const extracted = extractInnholdSection(html);
-
-  if (!extracted || extracted.length < MIN_SOURCE_TEXT_LENGTH) {
-    throw makeClassifiedError(
-      {
-        code: "source_extract_failed",
-        messageSafe: "Source extraction failed",
-        retryable: true,
-        classification: "expected_error",
-      },
-      "Source extraction failed",
-    );
-  }
-
-  return {
-    text: extracted,
-    method: "direct_scrape",
-    sourceUrl: targetUrl,
-  };
-}
-
 async function fetchProposalSource(
   proposal: ProposalRecord,
-  logger: Logger,
 ): Promise<SourceResult> {
   if (!proposal.stortinget_link) {
     throw makeClassifiedError(
@@ -471,26 +338,13 @@ async function fetchProposalSource(
     );
   }
 
-  try {
-    return await fetchViaJina(proposal.stortinget_link);
-  } catch (jinaError) {
-    const jinaClassified = classifyGenerationError(jinaError);
-    logger.warn("source_fetch_jina_failed", {
-      code: jinaClassified.code,
-      classification: jinaClassified.classification,
-      retryable: jinaClassified.retryable,
-    });
-  }
-
-  return await fetchViaDirectScrape(proposal.stortinget_link);
+  return await fetchViaJina(proposal.stortinget_link);
 }
 
 async function callOpenAiSummary(
   openAiApiKey: string,
   prompt: { system: string; user: string },
-): Promise<
-  { payload: ProposalSummaryPayload; usage: OpenAiResponsePayload["usage"] }
-> {
+): Promise<{ summaryText: string; usage: OpenAiResponsePayload["usage"] }> {
   const response = await withTimeout(
     fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -506,65 +360,13 @@ async function callOpenAiSummary(
         input: [
           {
             role: "system",
-            content: [
-              {
-                type: "input_text",
-                text: prompt.system,
-              },
-            ],
+            content: [{ type: "input_text", text: prompt.system }],
           },
           {
             role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: prompt.user,
-              },
-            ],
+            content: [{ type: "input_text", text: prompt.user }],
           },
         ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "proposal_summary",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              required: [
-                "short_summary",
-                "law_changes",
-                "affected_groups",
-                "caveats",
-                "sources",
-              ],
-              properties: {
-                short_summary: { type: "string" },
-                law_changes: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                affected_groups: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                caveats: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                sources: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["proposal_url", "fetch_method"],
-                  properties: {
-                    proposal_url: { type: "string" },
-                    fetch_method: { type: "string" },
-                  },
-                },
-              },
-            },
-          },
-        },
       }),
     }),
     OPENAI_TIMEOUT_MS,
@@ -575,7 +377,7 @@ async function callOpenAiSummary(
   }
 
   const parsedResponse = await response.json() as OpenAiResponsePayload;
-  const outputText = extractOpenAiOutputText(parsedResponse);
+  const outputText = extractOpenAiOutputText(parsedResponse)?.trim();
 
   if (!outputText) {
     throw makeClassifiedError(
@@ -589,36 +391,8 @@ async function callOpenAiSummary(
     );
   }
 
-  let summaryPayload: unknown;
-
-  try {
-    summaryPayload = JSON.parse(outputText);
-  } catch {
-    throw makeClassifiedError(
-      {
-        code: "openai_invalid_json",
-        messageSafe: "OpenAI returned invalid JSON",
-        retryable: true,
-        classification: "model_error",
-      },
-      "OpenAI returned invalid JSON",
-    );
-  }
-
-  if (!isProposalSummaryPayload(summaryPayload)) {
-    throw makeClassifiedError(
-      {
-        code: "openai_schema_mismatch",
-        messageSafe: "OpenAI output schema mismatch",
-        retryable: true,
-        classification: "model_error",
-      },
-      "OpenAI output schema mismatch",
-    );
-  }
-
   return {
-    payload: summaryPayload,
+    summaryText: outputText,
     usage: parsedResponse.usage,
   };
 }
@@ -655,7 +429,7 @@ async function persistFailure(
 async function persistSuccess(
   supabase: ReturnType<typeof createClient>,
   summaryId: string,
-  summaryPayload: ProposalSummaryPayload,
+  summaryText: string,
   source: SourceResult,
 ): Promise<void> {
   const result = await withTimeout(
@@ -663,7 +437,7 @@ async function persistSuccess(
       .from("proposal_summaries")
       .update({
         generation_status: "ready",
-        summary_payload: summaryPayload,
+        summary_payload: summaryText,
         model_id: OPENAI_MODEL_ID,
         prompt_version: PROMPT_VERSION,
         source_url: source.sourceUrl,
@@ -839,23 +613,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
 
     try {
-      const source = await fetchProposalSource(proposal, logger);
-      const linkedDocuments = await fetchLinkedDocuments(supabase, proposalId);
-      const prompt = createPrompt(
-        proposal,
-        linkedDocuments,
-        source.text,
-        source.method,
-      );
+      const source = await fetchProposalSource(proposal);
+      const prompt = createPrompt(proposal, source.text);
       const openAi = await callOpenAiSummary(openAiApiKey, prompt);
-
-      openAi.payload.sources.proposal_url = proposal.stortinget_link ?? "";
-      openAi.payload.sources.fetch_method = source.method;
 
       await persistSuccess(
         supabase,
         claimRow.summary_id,
-        openAi.payload,
+        openAi.summaryText,
         source,
       );
 

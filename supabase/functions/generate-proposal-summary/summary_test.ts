@@ -2,7 +2,6 @@ import {
   extractBetweenComments,
   extractInnholdSection,
   extractOpenAiOutputText,
-  isProposalSummaryPayload,
   stripHtmlTags,
   truncateForPrompt,
 } from "./summary.ts";
@@ -56,32 +55,6 @@ Deno.test("truncateForPrompt truncates with ellipsis", () => {
 
   if (value !== "abcd...") {
     throw new Error(`unexpected truncated text: ${value}`);
-  }
-});
-
-Deno.test("isProposalSummaryPayload validates expected shape", () => {
-  const valid = {
-    short_summary: "Kort oppsummering",
-    law_changes: ["Endring 1"],
-    affected_groups: ["Gruppe 1"],
-    caveats: ["Forbehold"],
-    sources: {
-      proposal_url: "https://example.com",
-      fetch_method: "jina",
-    },
-  };
-
-  if (!isProposalSummaryPayload(valid)) {
-    throw new Error("expected payload to be valid");
-  }
-
-  const invalid = {
-    ...valid,
-    law_changes: "ikke array",
-  };
-
-  if (isProposalSummaryPayload(invalid)) {
-    throw new Error("expected invalid payload to be rejected");
   }
 });
 
