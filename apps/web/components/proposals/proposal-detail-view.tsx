@@ -353,7 +353,7 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Tittel</TableHead>
-                  <TableHead>Dokument-ID</TableHead>
+                  <TableHead>Link</TableHead>
                   <TableHead>Dokumenttype</TableHead>
                 </TableRow>
               </TableHeader>
