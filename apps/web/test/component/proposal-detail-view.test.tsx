@@ -33,6 +33,12 @@ function createPayload(): ProposalDetailResponse {
         document_type: "lov",
       },
     ],
+    summary: {
+      status: "ready",
+      data: "Forslaget moderniserer skattereglene.",
+      generated_at: "2026-02-10T10:00:00.000Z",
+      next_retry_at: null,
+    },
   }
 }
 
@@ -54,6 +60,9 @@ describe("ProposalDetailView", () => {
     expect(
       screen.getByText(/Kongen fastsetter dato under kongelig resolusjon\./)
     ).toBeInTheDocument()
+    expect(
+      screen.getByText("Forslaget moderniserer skattereglene.")
+    ).toBeInTheDocument()
   })
 
   it("shows not-found feedback when the proposal API returns 404", async () => {
@@ -70,5 +79,37 @@ describe("ProposalDetailView", () => {
     expect(
       screen.getByText(/Forslaget finnes ikke, eller du har brukt en ugyldig lenke/)
     ).toBeInTheDocument()
+  })
+
+  it("auto-triggers summary generation when summary is missing", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ...createPayload(),
+          summary: {
+            status: "missing",
+            data: null,
+            generated_at: null,
+            next_retry_at: null,
+          },
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ status: "started" }))
+      .mockResolvedValueOnce(jsonResponse(createPayload()))
+
+    render(
+      <ProposalDetailView proposalId="d4d87de7-e28f-44c9-b6c5-0f899f9a3201" />
+    )
+
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "/api/proposals/d4d87de7-e28f-44c9-b6c5-0f899f9a3201"
+    )
+    expect(vi.mocked(fetch).mock.calls[1]?.[0]).toBe(
+      "/api/proposals/d4d87de7-e28f-44c9-b6c5-0f899f9a3201/summary"
+    )
   })
 })

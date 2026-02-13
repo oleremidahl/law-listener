@@ -7,6 +7,8 @@ import type {
   ProposalDetailResponse,
   ProposalListItem,
   ProposalListResponse,
+  ProposalSummaryPayload,
+  ProposalSummaryState,
 } from "@/lib/types"
 
 function createListError(message: string, details: unknown): Error {
@@ -119,6 +121,74 @@ function isNotFoundError(error: { code?: string } | null): boolean {
   return Boolean(error?.code && ["PGRST116", "PGRST205"].includes(error.code))
 }
 
+type SummaryGenerationStatus = "pending" | "ready" | "failed"
+
+function extractSummaryPayload(value: unknown): ProposalSummaryPayload | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim()
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  // Backward compatibility for older rows written as object payloads.
+  const record = value as Record<string, unknown>
+
+  if (typeof record.summary_text === "string" && record.summary_text.trim().length > 0) {
+    return record.summary_text.trim()
+  }
+
+  if (typeof record.short_summary === "string" && record.short_summary.trim().length > 0) {
+    return record.short_summary.trim()
+  }
+
+  return null
+}
+
+function mapSummaryState(row: {
+  generation_status: SummaryGenerationStatus
+  summary_payload: unknown
+  generated_at: string | null
+  next_retry_at: string | null
+} | null): ProposalSummaryState {
+  if (!row) {
+    return {
+      status: "missing",
+      data: null,
+      generated_at: null,
+      next_retry_at: null,
+    }
+  }
+
+  if (row.generation_status === "pending") {
+    return {
+      status: "pending",
+      data: null,
+      generated_at: row.generated_at,
+      next_retry_at: row.next_retry_at,
+    }
+  }
+
+  const summaryPayload = extractSummaryPayload(row.summary_payload)
+
+  if (row.generation_status === "ready" && summaryPayload) {
+    return {
+      status: "ready",
+      data: summaryPayload,
+      generated_at: row.generated_at,
+      next_retry_at: row.next_retry_at,
+    }
+  }
+
+  return {
+    status: "failed",
+    data: null,
+    generated_at: row.generated_at,
+    next_retry_at: row.next_retry_at,
+  }
+}
+
 export async function getProposalDetail(
   proposalId: string
 ): Promise<ProposalDetailResponse | null> {
@@ -172,8 +242,20 @@ export async function getProposalDetail(
       .filter((document): document is LinkedDocument => Boolean(document))
   }
 
+  const { data: summaryRow, error: summaryError } = await supabase
+    .from("proposal_summaries")
+    .select("generation_status,summary_payload,generated_at,next_retry_at")
+    .eq("proposal_id", proposalId)
+    .eq("proposal_status", proposal.status)
+    .maybeSingle()
+
+  if (summaryError && !isNotFoundError(summaryError)) {
+    throw createListError("Could not fetch proposal summary", summaryError)
+  }
+
   return {
     proposal: proposal as ProposalDetail,
     linkedDocuments,
+    summary: mapSummaryState(summaryRow),
   }
 }

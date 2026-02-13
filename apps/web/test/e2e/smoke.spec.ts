@@ -28,6 +28,12 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
             document_type: "lov",
           },
         ],
+        summary: {
+          status: "ready",
+          data: "Forslaget moderniserer skattereglene.",
+          generated_at: "2026-02-10T10:00:00.000Z",
+          next_retry_at: null,
+        },
       }),
     })
   })

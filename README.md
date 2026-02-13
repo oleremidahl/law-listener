@@ -9,7 +9,8 @@ The project is built as a pipeline:
 1. A scheduled Cloudflare worker reads the Stortinget RSS feed.
 2. New proposals are ingested into Supabase.
 3. A matcher worker + edge function extract legal references and link proposals to legal documents.
-4. A Next.js frontend exposes searchable proposal and detail views.
+4. An edge function generates cached AI summaries (OpenAI `gpt-4.1-mini`) on-demand per proposal status.
+5. A Next.js frontend exposes searchable proposal and detail views.
 
 ## Current Repository Structure
 

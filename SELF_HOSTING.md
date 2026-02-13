@@ -36,14 +36,18 @@ Create `supabase/functions/.env`:
 ```bash
 STORTINGET_WORKER_SECRET=<your-ingest-secret>
 LAW_MATCHER_WORKER_SECRET=<your-matcher-secret>
+SUMMARY_TRIGGER_SECRET=<your-summary-trigger-secret>
 SUPABASE_URL=<your-supabase-url>
 SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+OPENAI_API_KEY=<your-openai-api-key>
+SUMMARY_RETRY_COOLDOWN_SECONDS=3600
+SUMMARY_PENDING_TTL_SECONDS=180
 SENTRY_DSN=<optional-sentry-dsn>
 ```
 
 Notes:
 - `SENTRY_DSN` is optional. If missing, edge functions continue without Sentry.
-- Use strong random values for both worker secrets.
+- Use strong random values for all shared secrets.
 
 ## 4. Configure Cloudflare Workers
 
@@ -76,6 +80,8 @@ Create `apps/web/.env.local`:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=<your-supabase-url>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<your-publishable-key>
+SUMMARY_EDGE_FUNCTION_URL=<your-supabase-url>/functions/v1/generate-proposal-summary
+SUMMARY_TRIGGER_SECRET=<same-summary-trigger-secret-as-edge-function>
 ```
 
 Then run locally:
@@ -110,7 +116,7 @@ Edge checks/tests:
 ```bash
 deno fmt --check supabase/functions
 deno lint supabase/functions
-deno test --allow-env supabase/functions/shared/logger_test.ts
+deno test --allow-env supabase/functions/shared/logger_test.ts supabase/functions/generate-proposal-summary/summary_test.ts
 ```
 
 ## 7. Deploy
