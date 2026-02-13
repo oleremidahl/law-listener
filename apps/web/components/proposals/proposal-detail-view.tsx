@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table"
 import { formatEnforcementDate } from "@/lib/enforcement"
 import { formatDate } from "@/lib/query"
-import { cn } from "@/lib/utils"
+import { cn, getLovdataLinkFromDokid } from "@/lib/utils"
 import type {
   ProposalDetailResponse,
   ProposalSummaryState,
@@ -353,7 +353,7 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Tittel</TableHead>
-                  <TableHead>Legacy ID</TableHead>
+                  <TableHead>Dokument-ID</TableHead>
                   <TableHead>Dokumenttype</TableHead>
                 </TableRow>
               </TableHeader>
@@ -364,7 +364,14 @@ export function ProposalDetailView({ proposalId }: { proposalId: string }) {
                       {document.short_title ?? document.title}
                     </TableCell>
                     <TableCell className="text-zinc-700">
-                      {document.legacy_id ?? "Mangler"}
+                      <a
+                        href={getLovdataLinkFromDokid(document.dokid)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {document.dokid}
+                      </a>
                     </TableCell>
                     <TableCell className="text-zinc-700">
                       {document.document_type}
