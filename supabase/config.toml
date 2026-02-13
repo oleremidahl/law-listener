@@ -324,3 +324,6 @@ verify_jwt = false
 
 [functions.upsert-test-proposal]
 verify_jwt = false
+
+[functions.generate-proposal-summary]
+verify_jwt = false
