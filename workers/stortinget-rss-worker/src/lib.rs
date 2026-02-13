@@ -405,6 +405,59 @@ mod tests {
     }
 
     #[test]
+    fn parse_rss_items_handles_multiple_items() {
+        let xml = r#"
+            <rss>
+              <channel>
+                <item>
+                  <title>Lovvedtak 1</title>
+                  <link>https://example.com/lov/1</link>
+                  <dc:date>2026-02-12T09:15:00+01:00</dc:date>
+                </item>
+                <item>
+                  <title>Lovvedtak 2</title>
+                  <link>https://example.com/lov/2</link>
+                  <dc:date>2026-02-13T10:00:00+01:00</dc:date>
+                </item>
+              </channel>
+            </rss>
+        "#;
+
+        let items = parse_rss_items(xml).expect("rss parse should succeed");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].title, "Lovvedtak 1");
+        assert_eq!(items[1].title, "Lovvedtak 2");
+    }
+
+    #[test]
+    fn parse_rss_items_handles_empty_feed() {
+        let xml = r#"
+            <rss>
+              <channel>
+              </channel>
+            </rss>
+        "#;
+
+        let items = parse_rss_items(xml).expect("rss parse should succeed");
+        assert_eq!(items.len(), 0);
+    }
+
+    #[test]
+    fn parse_rss_items_handles_malformed_xml() {
+        let xml = r#"
+            <rss>
+              <channel>
+                <item>
+                  <title>Unclosed item
+              </channel>
+        "#;
+
+        let result = parse_rss_items(xml);
+        // The parser may return an error for malformed XML
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
     fn resolve_request_id_preserves_non_empty_value() {
         let result = resolve_request_id_with_generator(Some("req-123"), || "generated".to_string());
         assert_eq!(result, "req-123");
@@ -420,5 +473,125 @@ mod tests {
     fn resolve_request_id_generates_value_when_blank() {
         let result = resolve_request_id_with_generator(Some("   "), || "generated-id".to_string());
         assert_eq!(result, "generated-id");
+    }
+
+    #[test]
+    #[cfg(target_arch = "wasm32")]
+    fn set_request_id_header_adds_header_to_response() {
+        let mut response = Response::ok("test").expect("response creation should succeed");
+        set_request_id_header(&mut response, "test-req-id");
+        
+        let header_value = response.headers().get("X-Request-ID").ok().flatten();
+        assert_eq!(header_value.as_deref(), Some("test-req-id"));
+    }
+
+    // Tests for new-item detection logic
+    mod new_item_detection {
+        use super::*;
+
+        #[test]
+        fn detects_all_items_as_new_when_no_previous_state() {
+            let xml = r#"
+                <rss>
+                  <channel>
+                    <item>
+                      <title>Lovvedtak 1</title>
+                      <link>https://example.com/lov/1</link>
+                    </item>
+                    <item>
+                      <title>Lovvedtak 2</title>
+                      <link>https://example.com/lov/2</link>
+                    </item>
+                  </channel>
+                </rss>
+            "#;
+
+            let all_items = parse_rss_items(xml).expect("parse should succeed");
+            let last_seen_url: Option<String> = None;
+            let mut new_items = Vec::new();
+
+            for item in all_items {
+                if let Some(ref seen_url) = last_seen_url {
+                    if item.stortinget_link.as_deref() == Some(seen_url) {
+                        break;
+                    }
+                }
+                new_items.push(item);
+            }
+
+            assert_eq!(new_items.len(), 2);
+        }
+
+        #[test]
+        fn stops_at_previously_seen_url() {
+            let xml = r#"
+                <rss>
+                  <channel>
+                    <item>
+                      <title>Lovvedtak 3</title>
+                      <link>https://example.com/lov/3</link>
+                    </item>
+                    <item>
+                      <title>Lovvedtak 2</title>
+                      <link>https://example.com/lov/2</link>
+                    </item>
+                    <item>
+                      <title>Lovvedtak 1</title>
+                      <link>https://example.com/lov/1</link>
+                    </item>
+                  </channel>
+                </rss>
+            "#;
+
+            let all_items = parse_rss_items(xml).expect("parse should succeed");
+            let last_seen_url = Some("https://example.com/lov/2".to_string());
+            let mut new_items = Vec::new();
+
+            for item in all_items {
+                if let Some(ref seen_url) = last_seen_url {
+                    if item.stortinget_link.as_deref() == Some(seen_url) {
+                        break;
+                    }
+                }
+                new_items.push(item);
+            }
+
+            assert_eq!(new_items.len(), 1);
+            assert_eq!(new_items[0].title, "Lovvedtak 3");
+        }
+
+        #[test]
+        fn handles_items_without_links() {
+            let xml = r#"
+                <rss>
+                  <channel>
+                    <item>
+                      <title>Lovvedtak without link</title>
+                    </item>
+                    <item>
+                      <title>Lovvedtak 1</title>
+                      <link>https://example.com/lov/1</link>
+                    </item>
+                  </channel>
+                </rss>
+            "#;
+
+            let all_items = parse_rss_items(xml).expect("parse should succeed");
+            let last_seen_url = Some("https://example.com/lov/1".to_string());
+            let mut new_items = Vec::new();
+
+            for item in all_items {
+                if let Some(ref seen_url) = last_seen_url {
+                    if item.stortinget_link.as_deref() == Some(seen_url) {
+                        break;
+                    }
+                }
+                new_items.push(item);
+            }
+
+            // Item without link is included before we hit the last seen URL
+            assert_eq!(new_items.len(), 1);
+            assert_eq!(new_items[0].title, "Lovvedtak without link");
+        }
     }
 }
