@@ -110,7 +110,12 @@ test("smoke flow: list -> filter -> detail", async ({ page }) => {
 
   await expect(page).toHaveURL(new RegExp(`/proposal/${proposalId}`))
   await expect(page.getByText("Koblede lover")).toBeVisible()
-  await expect(page.getByText("LOV-2017-06-16-60")).toBeVisible()
+  
+  // Check that dokid is displayed as a clickable link
+  const lovdataLink = page.getByRole("link", { name: "LOV-2017-06-16-60" })
+  await expect(lovdataLink).toBeVisible()
+  await expect(lovdataLink).toHaveAttribute("href", "https://lovdata.no/dokument/LOV-2017-06-16-60")
+  
   await expect(page.getByRole("link", { name: "Åpne på Stortinget" })).toBeVisible()
   await expect(
     page.getByText("Kongen fastsetter dato under kongelig resolusjon.")

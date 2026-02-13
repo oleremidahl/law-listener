@@ -63,6 +63,11 @@ describe("ProposalDetailView", () => {
     expect(
       screen.getByText("Forslaget moderniserer skattereglene.")
     ).toBeInTheDocument()
+    
+    // Check that dokid is displayed as a link
+    const lovdataLink = screen.getByRole("link", { name: "LOV-2017-06-16-60" })
+    expect(lovdataLink).toBeInTheDocument()
+    expect(lovdataLink).toHaveAttribute("href", "https://lovdata.no/dokument/LOV-2017-06-16-60")
   })
 
   it("shows not-found feedback when the proposal API returns 404", async () => {
